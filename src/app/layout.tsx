@@ -5,6 +5,7 @@ import SiteFooter from "@/components/SiteFooter";
 import ThemeVars from "@/components/ThemeVars";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://axlab.scnuai.com"),
   title: {
     default: "AX OPEN LAB 시설예약",
     template: "%s | AX OPEN LAB 시설예약",
