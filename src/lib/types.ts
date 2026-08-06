@@ -42,4 +42,4 @@ export const STATUS_LABEL: Record<ReservationStatus, string> = {
 
 // 예약 규칙
 export const MAX_HOURS_PER_DAY = 9;
-export const BOOKING_WINDOW_DAYS = 14; // 오늘부터 2주 후까지
+export const BOOKING_WINDOW_DAYS = 30; // 오늘부터 한 달 후까지
