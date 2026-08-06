@@ -1,0 +1,26 @@
+rules_version = '2';
+
+// 데모용 보안 규칙입니다. 운영 환경에서는 인증(Firebase Auth) 기반으로
+// 강화하세요. (예: 시설/예약 쓰기 권한을 관리자에게만 부여)
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 시설: 누구나 읽기 가능, 쓰기는 데모에서 허용 (운영 시 관리자만으로 제한 권장)
+    match /facilities/{id} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // 예약: 누구나 읽기/쓰기 (운영 시 검증 로직 추가 권장)
+    match /reservations/{id} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // 사이트 설정/관리자 계정 (데모: 누구나 읽기/쓰기).
+    // 운영 시 settings/admin 은 Firebase Auth 관리자만 읽기/쓰기하도록 제한하세요.
+    match /settings/{id} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}
