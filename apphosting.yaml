@@ -1,0 +1,47 @@
+# Firebase App Hosting runtime/build configuration.
+# NEXT_PUBLIC_* values are inlined into the client bundle at build time,
+# so they need BUILD availability (in addition to RUNTIME).
+env:
+  - variable: NEXT_PUBLIC_FIREBASE_API_KEY
+    value: "AIzaSyAN55hzWloLakYWkiHStwbWw8aEEmoMdi8"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+    value: "digital-33d9e.firebaseapp.com"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
+    value: "digital-33d9e"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
+    value: "digital-33d9e.firebasestorage.app"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
+    value: "798740180023"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_APP_ID
+    value: "1:798740180023:web:834584bbfcdb1617dd23b2"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID
+    value: "G-TBNQ0W2Y9V"
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: RESEND_API_KEY
+    secret: resend-api-key
+    availability:
+      - RUNTIME
+  - variable: RESEND_FROM_EMAIL
+    value: "AX OPEN LAB <noreply@axlab.scnuai.com>"
+    availability:
+      - RUNTIME
