@@ -3,7 +3,30 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { NAV, findSection } from "@/lib/nav";
+import { NAV, findSection, isExternalHref } from "@/lib/nav";
+
+function NavLink({
+  href,
+  className,
+  children,
+}: {
+  href: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  if (isExternalHref(href)) {
+    return (
+      <a href={href} target="_blank" rel="noreferrer" className={className}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link href={href} className={className}>
+      {children}
+    </Link>
+  );
+}
 
 export default function SiteHeader() {
   const pathname = usePathname();
@@ -32,14 +55,14 @@ export default function SiteHeader() {
                 key={sec.title}
                 className={`gnb${section?.title === sec.title ? " on" : ""}`}
               >
-                <Link href={sec.href}>{sec.title}</Link>
+                <NavLink href={sec.href}>{sec.title}</NavLink>
                 <div className="wrap">
                   <ul className="depth">
                     {sec.items.map((it) => (
                       <li key={it.href}>
-                        <Link href={it.href}>
+                        <NavLink href={it.href}>
                           <span>{it.label}</span>
-                        </Link>
+                        </NavLink>
                       </li>
                     ))}
                   </ul>
@@ -83,7 +106,7 @@ export default function SiteHeader() {
                 <ul>
                   {sec.items.map((it) => (
                     <li key={it.href}>
-                      <Link href={it.href}>{it.label}</Link>
+                      <NavLink href={it.href}>{it.label}</NavLink>
                     </li>
                   ))}
                 </ul>
@@ -108,7 +131,7 @@ export default function SiteHeader() {
             <ul className="depth_3">
               {section.items.map((it) => (
                 <li key={it.href} className={pathname === it.href ? "on" : ""}>
-                  <Link href={it.href}>{it.label}</Link>
+                  <NavLink href={it.href}>{it.label}</NavLink>
                 </li>
               ))}
             </ul>
