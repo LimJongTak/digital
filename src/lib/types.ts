@@ -25,6 +25,13 @@ export interface Reservation {
   purpose?: string;
   status: ReservationStatus;
   createdAt: number; // epoch ms
+  groupId?: string; // 통합 예약(예: Co-Work Zone 1+2)을 함께 묶는 id
+}
+
+// 관리자가 수동으로 지정한 휴무일 (자동 계산되는 대체공휴일 누락분 등을 보완)
+export interface BlockedDate {
+  date: string; // "YYYY-MM-DD"
+  reason?: string;
 }
 
 export const STATUS_LABEL: Record<ReservationStatus, string> = {

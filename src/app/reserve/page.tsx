@@ -27,8 +27,8 @@ export default function ReservePage() {
               <img src="/images/ico/inq_ico.png" alt="시설 사용 문의" />
             </div>
             <b>시설 사용 문의</b>
-            <p>담당자 : 국립순천대학교 디지털+X 산업기술센터</p>
-            <p>전화번호 : 010-5030-0276</p>
+            <p>담당자 : 국립순천대학교 AX OPEN LAB 정효리</p>
+            <p>전화번호 : 061-750-5391</p>
           </div>
         </div>
 

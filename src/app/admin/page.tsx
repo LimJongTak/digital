@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Facility, Reservation, ReservationStatus } from "@/lib/types";
+import type { BlockedDate, Facility, Reservation, ReservationStatus } from "@/lib/types";
 import { STATUS_LABEL } from "@/lib/types";
 import {
   getFacilities,
@@ -13,6 +13,9 @@ import {
   deleteReservation,
   seedFacilitiesIfEmpty,
   createReservation,
+  getBlockedDates,
+  addBlockedDate,
+  removeBlockedDate,
 } from "@/lib/db";
 import {
   getSiteSettings,
@@ -23,12 +26,12 @@ import {
   type SiteSettings,
 } from "@/lib/settings";
 import { isFirebaseConfigured } from "@/lib/firebase";
-import { weekdayLabel } from "@/lib/date";
+import { weekdayLabel, isBlockedForPublic } from "@/lib/date";
 import ConfigNotice from "@/components/ConfigNotice";
 
 const SESSION_KEY = "admin_authed";
 
-type Tab = "reservations" | "addReservation" | "facilities" | "site" | "password";
+type Tab = "reservations" | "addReservation" | "facilities" | "holidays" | "site" | "password";
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState(false);
@@ -156,10 +159,13 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
           예약 관리
         </TabBtn>
         <TabBtn active={tab === "addReservation"} onClick={() => setTab("addReservation")}>
-          예약 등록 (주말 포함)
+          예약 등록 (주말/공휴일 포함)
         </TabBtn>
         <TabBtn active={tab === "facilities"} onClick={() => setTab("facilities")}>
           시설 관리
+        </TabBtn>
+        <TabBtn active={tab === "holidays"} onClick={() => setTab("holidays")}>
+          휴무일 관리
         </TabBtn>
         <TabBtn active={tab === "site"} onClick={() => setTab("site")}>
           사이트 설정
@@ -171,6 +177,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       {tab === "reservations" && <ReservationsAdmin />}
       {tab === "addReservation" && <AdminAddReservation />}
       {tab === "facilities" && <FacilitiesAdmin />}
+      {tab === "holidays" && <HolidaysAdmin />}
       {tab === "site" && <SiteSettingsAdmin />}
       {tab === "password" && <PasswordAdmin />}
     </div>
@@ -665,7 +672,7 @@ function AdminAddReservation() {
   return (
     <div className="max-w-lg">
       <p className="mb-4 text-sm text-gray-500">
-        주말을 포함해 관리자가 직접 예약을 등록합니다. (일반 사용자는 주말 예약이 불가합니다)
+        주말/공휴일을 포함해 관리자가 직접 예약을 등록합니다. (일반 사용자는 주말/공휴일 예약이 불가합니다)
       </p>
       <form onSubmit={submit} className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
         <Field label="시설">
@@ -690,7 +697,7 @@ function AdminAddReservation() {
           />
           {date && (
             <p className="mt-1 text-xs text-gray-400">
-              {weekdayLabel(date)}요일{["토", "일"].includes(weekdayLabel(date)) ? " · 주말" : ""}
+              {weekdayLabel(date)}요일{isBlockedForPublic(date) ? " · 주말/공휴일" : ""}
             </p>
           )}
         </Field>
@@ -756,6 +763,121 @@ function AdminAddReservation() {
           {submitting ? "등록 중…" : "예약 등록"}
         </button>
       </form>
+    </div>
+  );
+}
+
+/* --------------------------- 휴무일 관리 --------------------------- */
+
+function HolidaysAdmin() {
+  const [items, setItems] = useState<BlockedDate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [date, setDate] = useState("");
+  const [reason, setReason] = useState("");
+  const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setItems(await getBlockedDates());
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    if (!date) {
+      setMsg({ type: "err", text: "날짜를 선택하세요." });
+      return;
+    }
+    if (items.some((b) => b.date === date)) {
+      setMsg({ type: "err", text: "이미 등록된 날짜입니다." });
+      return;
+    }
+    await addBlockedDate(date, reason.trim());
+    setDate("");
+    setReason("");
+    setMsg({ type: "ok", text: "휴무일이 등록되었습니다." });
+    await load();
+  }
+
+  async function remove(d: string) {
+    if (!confirm(`${d} 휴무일 지정을 해제하시겠습니까?`)) return;
+    await removeBlockedDate(d);
+    await load();
+  }
+
+  return (
+    <div className="max-w-lg">
+      <p className="mb-4 text-sm text-gray-500">
+        설날/추석 등 대체공휴일이 자동 목록에 반영되지 않았거나, 임시 휴무가 필요할 때 날짜를
+        직접 추가하세요. 등록된 날짜는 일반 사용자에게 주말/공휴일과 동일하게 예약이 막힙니다.
+      </p>
+      <form
+        onSubmit={add}
+        className="mb-6 space-y-3 rounded-lg border border-gray-200 bg-white p-4"
+      >
+        <Field label="날짜">
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+          />
+        </Field>
+        <Field label="사유 (선택)">
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="예: 대체공휴일, 시설 점검"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+          />
+        </Field>
+        {msg && (
+          <p className={`text-sm ${msg.type === "ok" ? "text-green-600" : "text-red-600"}`}>
+            {msg.text}
+          </p>
+        )}
+        <button
+          type="submit"
+          className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          휴무일 추가
+        </button>
+      </form>
+
+      <h2 className="mb-2 font-semibold text-gray-900">등록된 휴무일</h2>
+      {loading ? (
+        <p className="text-sm text-gray-500">불러오는 중…</p>
+      ) : items.length === 0 ? (
+        <p className="text-sm text-gray-500">수동으로 등록한 휴무일이 없습니다.</p>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((b) => (
+            <li
+              key={b.date}
+              className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3"
+            >
+              <div>
+                <span className="font-medium text-gray-900">{b.date}</span>
+                {b.reason && <span className="ml-2 text-xs text-gray-400">{b.reason}</span>}
+              </div>
+              <button
+                onClick={() => remove(b.date)}
+                className="text-xs text-red-500 hover:underline"
+              >
+                해제
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

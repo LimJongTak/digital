@@ -29,7 +29,7 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   primaryColor: "#006cb2",
   footer: {
     orgAddress: "전남광주통합특별시 순천시 중앙로 255(석현동) 산학협력단 708호(AI인재양성부트캠프사업단)",
-    phone: "061-750-5390~8",
+    phone: "061-750-5391",
     copyright: "CopyrightⓒSunchon National University. All rights reserved",
   },
 };

@@ -5,8 +5,26 @@ import SiteFooter from "@/components/SiteFooter";
 import ThemeVars from "@/components/ThemeVars";
 
 export const metadata: Metadata = {
-  title: "국립순천대학교 디지털+X 산업기술센터 시설예약",
-  description: "국립순천대학교 디지털+X 산업기술센터 시설예약 시스템",
+  title: {
+    default: "AX OPEN LAB 시설예약",
+    template: "%s | AX OPEN LAB 시설예약",
+  },
+  description:
+    "국립순천대학교 AX OPEN LAB 시설예약 시스템 — Co-Work Zone, Data & Idea Zone 등 공간을 온라인으로 예약하세요.",
+  openGraph: {
+    title: "AX OPEN LAB 시설예약",
+    description:
+      "국립순천대학교 AX OPEN LAB 시설예약 시스템 — Co-Work Zone, Data & Idea Zone 등 공간을 온라인으로 예약하세요.",
+    siteName: "AX OPEN LAB 시설예약",
+    locale: "ko_KR",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "AX OPEN LAB 시설예약",
+    description:
+      "국립순천대학교 AX OPEN LAB 시설예약 시스템 — Co-Work Zone, Data & Idea Zone 등 공간을 온라인으로 예약하세요.",
+  },
 };
 
 export default function RootLayout({

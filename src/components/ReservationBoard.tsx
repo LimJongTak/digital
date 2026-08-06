@@ -7,6 +7,8 @@ import {
   getFacilities,
   getReservationsByMonth,
   createReservation,
+  createComboReservation,
+  getBlockedDates,
 } from "@/lib/db";
 import {
   WEEKDAYS,
@@ -14,10 +16,22 @@ import {
   weekdayLabel,
   isWithinBookingWindow,
   isPast,
-  isWeekend,
+  isBlockedForPublic,
   toDateStr,
   startOfToday,
 } from "@/lib/date";
+
+const COMBO_ID = "__combo_zone1_2__";
+
+interface Target {
+  id: string;
+  name: string;
+  capacity: number;
+  description: string;
+  openHour: number;
+  closeHour: number;
+  facilities: Facility[]; // 단일 예약 1개, 통합 예약 2개
+}
 
 type BookedMap = Record<string, Set<number>>;
 
@@ -36,29 +50,60 @@ function cardImage(f: Facility): string | null {
   return null;
 }
 
+function buildTargets(facilities: Facility[]): Target[] {
+  const targets: Target[] = facilities.map((f) => ({
+    id: f.id,
+    name: f.name,
+    capacity: f.capacity,
+    description: f.description,
+    openHour: f.openHour,
+    closeHour: f.closeHour,
+    facilities: [f],
+  }));
+
+  const zone1 = facilities.find((f) => f.name === "Co-Work Zone 1");
+  const zone2 = facilities.find((f) => f.name === "Co-Work Zone 2");
+  if (zone1 && zone2) {
+    targets.push({
+      id: COMBO_ID,
+      name: "Co-Work Zone 1+2 (통합)",
+      capacity: zone1.capacity + zone2.capacity,
+      description: "Co-Work Zone 1, 2를 하나의 공간으로 통합해 예약합니다\n대규모 회의/행사에 적합",
+      openHour: Math.max(zone1.openHour, zone2.openHour),
+      closeHour: Math.min(zone1.closeHour, zone2.closeHour),
+      facilities: [zone1, zone2],
+    });
+  }
+  return targets;
+}
+
 export default function ReservationBoard() {
   const today = startOfToday();
   const todayStr = toDateStr(today);
   const [facilities, setFacilities] = useState<Facility[]>([]);
-  const [facilityId, setFacilityId] = useState<string>("");
+  const [targetId, setTargetId] = useState<string>("");
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<{ date: string; startHour: number } | null>(null);
+  const [blockedDates, setBlockedDates] = useState<Set<string>>(new Set());
 
-  const facility = useMemo(
-    () => facilities.find((f) => f.id === facilityId) ?? null,
-    [facilities, facilityId],
+  const targets = useMemo(() => buildTargets(facilities), [facilities]);
+
+  const target = useMemo(
+    () => targets.find((t) => t.id === targetId) ?? null,
+    [targets, targetId],
   );
 
   useEffect(() => {
     (async () => {
       try {
-        const fs = await getFacilities();
+        const [fs, blocked] = await Promise.all([getFacilities(), getBlockedDates()]);
         setFacilities(fs);
-        if (fs.length) setFacilityId(fs[0].id);
+        setBlockedDates(new Set(blocked.map((b) => b.date)));
+        if (fs.length) setTargetId(fs[0].id);
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -68,13 +113,16 @@ export default function ReservationBoard() {
   }, []);
 
   const loadReservations = useCallback(async () => {
-    if (!facilityId) return;
+    if (!target) return;
     try {
-      setReservations(await getReservationsByMonth(facilityId, year, month));
+      const lists = await Promise.all(
+        target.facilities.map((f) => getReservationsByMonth(f.id, year, month)),
+      );
+      setReservations(lists.flat());
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [facilityId, year, month]);
+  }, [target, year, month]);
 
   useEffect(() => {
     loadReservations();
@@ -83,11 +131,11 @@ export default function ReservationBoard() {
   const bookedMap = useMemo(() => buildBookedMap(reservations), [reservations]);
 
   const hours = useMemo(() => {
-    if (!facility) return [];
+    if (!target) return [];
     const out: number[] = [];
-    for (let h = facility.openHour; h < facility.closeHour; h++) out.push(h);
+    for (let h = target.openHour; h < target.closeHour; h++) out.push(h);
     return out;
-  }, [facility]);
+  }, [target]);
 
   const weeks = useMemo(() => buildCalendar(year, month), [year, month]);
 
@@ -137,20 +185,18 @@ export default function ReservationBoard() {
     <div>
       {/* 회의실 카드 */}
       <div className="resv_list">
-        {facilities.map((f) => {
-          const img = cardImage(f);
+        {targets.map((t) => {
+          const img = cardImage(t.facilities[0]);
           return (
             <div
-              key={f.id}
-              className={`box${f.id === facilityId ? " on" : ""}`}
-              onClick={() => setFacilityId(f.id)}
+              key={t.id}
+              className={`box${t.id === targetId ? " on" : ""}`}
+              onClick={() => setTargetId(t.id)}
             >
               <div className="card">
-                <div className="img">
-                  {img && <img src={img} alt={f.name} />}
-                </div>
+                <div className="img">{img && <img src={img} alt={t.name} />}</div>
                 <div className="tit">
-                  <p>{f.name}</p>
+                  <p>{t.name}</p>
                   <span>
                     <img src="/images/ico/calendar.png" alt="달력" />
                   </span>
@@ -158,13 +204,13 @@ export default function ReservationBoard() {
               </div>
               <div className="info">
                 <ul>
-                  {f.description
+                  {t.description
                     .split("\n")
                     .filter(Boolean)
                     .map((line, i) => (
                       <li key={i}>{line}</li>
                     ))}
-                  <li>수용인원 {f.capacity}명</li>
+                  <li>수용인원 {t.capacity}명</li>
                 </ul>
               </div>
             </div>
@@ -173,10 +219,10 @@ export default function ReservationBoard() {
       </div>
 
       {/* 달력 */}
-      {facility && (
+      {target && (
         <div className="resv_calendar">
           <div className="zone">
-            <h4>{facility.name} 예약 신청</h4>
+            <h4>{target.name} 예약 신청</h4>
           </div>
 
           <div className="month_box">
@@ -222,6 +268,7 @@ export default function ReservationBoard() {
                               date={date}
                               hours={hours}
                               booked={bookedMap[date]}
+                              blockedDates={blockedDates}
                               onPick={(h) => setModal({ date, startHour: h })}
                             />
                           </div>
@@ -238,9 +285,9 @@ export default function ReservationBoard() {
         </div>
       )}
 
-      {modal && facility && (
+      {modal && target && (
         <ReservationModal
-          facility={facility}
+          target={target}
           date={modal.date}
           startHour={modal.startHour}
           bookedHours={bookedMap[modal.date] ?? new Set()}
@@ -260,16 +307,18 @@ function DaySlots({
   date,
   hours,
   booked,
+  blockedDates,
   onPick,
 }: {
   date: string;
   hours: number[];
   booked?: Set<number>;
+  blockedDates: Set<string>;
   onPick: (hour: number) => void;
 }) {
   if (isPast(date) || !isWithinBookingWindow(date)) return null;
-  if (isWeekend(date)) {
-    return <p className="doc impos">주말은 관리자 예약만 가능합니다</p>;
+  if (isBlockedForPublic(date) || blockedDates.has(date)) {
+    return <p className="doc impos">주말/공휴일은 관리자 예약만 가능합니다</p>;
   }
   return (
     <>
@@ -295,14 +344,14 @@ function DaySlots({
 /* ----------------------------- 예약 모달 ----------------------------- */
 
 function ReservationModal({
-  facility,
+  target,
   date,
   startHour,
   bookedHours,
   onClose,
   onDone,
 }: {
-  facility: Facility;
+  target: Target;
   date: string;
   startHour: number;
   bookedHours: Set<number>;
@@ -311,10 +360,10 @@ function ReservationModal({
 }) {
   const maxEnd = useMemo(() => {
     let end = startHour + 1;
-    const limit = Math.min(facility.closeHour, startHour + MAX_HOURS_PER_DAY);
+    const limit = Math.min(target.closeHour, startHour + MAX_HOURS_PER_DAY);
     while (end < limit && !bookedHours.has(end)) end++;
     return end;
-  }, [startHour, facility.closeHour, bookedHours]);
+  }, [startHour, target.closeHour, bookedHours]);
 
   const endOptions = useMemo(() => {
     const out: number[] = [];
@@ -346,18 +395,33 @@ function ReservationModal({
     }
     setSubmitting(true);
     try {
-      await createReservation({
-        facilityId: facility.id,
-        facilityName: facility.name,
-        date,
-        startHour,
-        endHour,
-        name: name.trim(),
-        phone: phone.trim(),
-        email: email.trim(),
-        org: org.trim(),
-        purpose: purpose.trim(),
-      });
+      if (target.facilities.length > 1) {
+        await createComboReservation({
+          facilities: target.facilities.map((f) => ({ id: f.id, name: f.name })),
+          date,
+          startHour,
+          endHour,
+          name: name.trim(),
+          phone: phone.trim(),
+          email: email.trim(),
+          org: org.trim(),
+          purpose: purpose.trim(),
+        });
+      } else {
+        const facility = target.facilities[0];
+        await createReservation({
+          facilityId: facility.id,
+          facilityName: facility.name,
+          date,
+          startHour,
+          endHour,
+          name: name.trim(),
+          phone: phone.trim(),
+          email: email.trim(),
+          org: org.trim(),
+          purpose: purpose.trim(),
+        });
+      }
       alert("예약 신청이 접수되었습니다.");
       onDone();
     } catch (e2) {
@@ -379,7 +443,7 @@ function ReservationModal({
       >
         <h2 className="mb-1 text-lg font-bold text-gray-900">예약 신청</h2>
         <p className="mb-4 text-sm text-gray-500">
-          {facility.name} · {date} ({weekdayLabel(date)})
+          {target.name} · {date} ({weekdayLabel(date)})
         </p>
 
         <div className="mb-3 grid grid-cols-2 gap-3">

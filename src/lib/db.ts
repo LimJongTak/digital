@@ -4,6 +4,7 @@ import {
   addDoc,
   getDoc,
   getDocs,
+  setDoc,
   updateDoc,
   deleteDoc,
   query,
@@ -11,11 +12,38 @@ import {
   orderBy,
 } from "firebase/firestore";
 import { db } from "./firebase";
-import { isWeekend } from "./date";
-import type { Facility, Reservation, ReservationStatus } from "./types";
+import { isBlockedForPublic } from "./date";
+import type { BlockedDate, Facility, Reservation, ReservationStatus } from "./types";
 
 const FACILITIES = "facilities";
 const RESERVATIONS = "reservations";
+const BLOCKED_DATES = "blockedDates";
+
+/* ----------------------------- 휴무일(수동 지정) ----------------------------- */
+// 대체공휴일 등 자동 계산 목록에서 누락될 수 있는 날짜를 관리자가 직접 막을 수 있다.
+// 문서 id로 날짜 문자열을 그대로 사용해 추가/삭제를 간단하게 한다.
+
+export async function getBlockedDates(): Promise<BlockedDate[]> {
+  const snap = await getDocs(collection(db, BLOCKED_DATES));
+  return snap.docs
+    .map((d) => d.data() as BlockedDate)
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
+export async function addBlockedDate(date: string, reason?: string): Promise<void> {
+  await setDoc(doc(db, BLOCKED_DATES, date), { date, reason: reason ?? "" });
+}
+
+export async function removeBlockedDate(date: string): Promise<void> {
+  await deleteDoc(doc(db, BLOCKED_DATES, date));
+}
+
+// 주말/공휴일(자동) + 관리자가 수동 지정한 휴무일을 함께 확인한다.
+async function isDateBlockedForPublic(date: string): Promise<boolean> {
+  if (isBlockedForPublic(date)) return true;
+  const snap = await getDoc(doc(db, BLOCKED_DATES, date));
+  return snap.exists();
+}
 
 /* ------------------------------- 시설 ------------------------------- */
 
@@ -97,13 +125,13 @@ export interface NewReservation {
 }
 
 // 예약 생성 (중복 시간 검사 포함). 성공 시 새 id 반환, 충돌 시 throw.
-// allowWeekend: 관리자 등록 경로에서만 true로 넘겨 주말 예약을 허용한다.
+// allowWeekend: 관리자 등록 경로에서만 true로 넘겨 주말/공휴일 예약을 허용한다.
 export async function createReservation(
   input: NewReservation,
   opts: { allowWeekend?: boolean } = {},
 ): Promise<string> {
-  if (!opts.allowWeekend && isWeekend(input.date)) {
-    throw new Error("주말 예약은 관리자를 통해서만 가능합니다.");
+  if (!opts.allowWeekend && (await isDateBlockedForPublic(input.date))) {
+    throw new Error("주말/공휴일 예약은 관리자를 통해서만 가능합니다.");
   }
 
   const existing = await getReservationsByDate(input.facilityId, input.date);
@@ -124,6 +152,65 @@ export async function createReservation(
   };
   const ref = await addDoc(collection(db, RESERVATIONS), payload);
   return ref.id;
+}
+
+export interface NewComboReservation {
+  facilities: { id: string; name: string }[]; // 통합 예약 대상 시설 2곳
+  date: string;
+  startHour: number;
+  endHour: number;
+  name: string;
+  phone: string;
+  email?: string;
+  org?: string;
+  purpose?: string;
+}
+
+// Co-Work Zone 1+2 같은 통합 예약: 두 시설 모두 충돌이 없어야 생성된다.
+export async function createComboReservation(
+  input: NewComboReservation,
+  opts: { allowWeekend?: boolean } = {},
+): Promise<string[]> {
+  if (!opts.allowWeekend && (await isDateBlockedForPublic(input.date))) {
+    throw new Error("주말/공휴일 예약은 관리자를 통해서만 가능합니다.");
+  }
+
+  for (const f of input.facilities) {
+    const existing = await getReservationsByDate(f.id, input.date);
+    const conflict = existing.find((r) =>
+      overlaps(input.startHour, input.endHour, r.startHour, r.endHour),
+    );
+    if (conflict) {
+      throw new Error(`${f.name}에 이미 예약된 시간대가 포함되어 있습니다. 다시 선택해 주세요.`);
+    }
+  }
+
+  const groupId =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  const ids: string[] = [];
+  for (const f of input.facilities) {
+    const payload: Omit<Reservation, "id"> = {
+      facilityId: f.id,
+      facilityName: `${f.name} (통합예약)`,
+      date: input.date,
+      startHour: input.startHour,
+      endHour: input.endHour,
+      name: input.name,
+      phone: input.phone,
+      email: input.email ?? "",
+      org: input.org ?? "",
+      purpose: input.purpose ?? "",
+      status: "pending",
+      createdAt: Date.now(),
+      groupId,
+    };
+    const ref = await addDoc(collection(db, RESERVATIONS), payload);
+    ids.push(ref.id);
+  }
+  return ids;
 }
 
 // 이름 + 연락처로 내 예약 조회
