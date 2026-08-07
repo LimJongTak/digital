@@ -2057,13 +2057,12 @@ a {
 }
 .all_menu .am_body {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 30px;
   padding: 50px 0;
 }
 .all_menu .am_col {
-  flex: 1;
-  min-width: 180px;
+  width: 100%;
 }
 .all_menu .am_col > span {
   display: block;

@@ -512,84 +512,144 @@ function ReservationsAdmin() {
       {filtered.length === 0 ? (
         <p className="text-sm text-gray-500">예약이 없습니다.</p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-gray-50 text-gray-600">
-              <tr>
-                <th className="px-3 py-2">상태</th>
-                <th className="px-3 py-2">시설</th>
-                <th className="px-3 py-2">일시</th>
-                <th className="px-3 py-2">예약자</th>
-                <th className="px-3 py-2">목적</th>
-                <th className="px-3 py-2 text-right">처리</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => (
-                <tr key={r.id} className="border-t border-gray-100 align-top">
-                  <td className="px-3 py-2">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs ${statusStyle[r.status]}`}
+        <>
+          {/* 모바일: 카드 목록 (좁은 화면에서 6열 표는 읽을 수 없으므로) */}
+          <ul className="space-y-3 md:hidden">
+            {filtered.map((r) => (
+              <li key={r.id} className="rounded-lg border border-gray-200 bg-white p-4">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span
+                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${statusStyle[r.status]}`}
+                  >
+                    {STATUS_LABEL[r.status]}
+                  </span>
+                  <span className="truncate text-sm font-medium text-gray-900">
+                    {r.facilityName}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-900">
+                  {r.date} ({weekdayLabel(r.date)}) {String(r.startHour).padStart(2, "0")}:00~
+                  {String(r.endHour).padStart(2, "0")}:00
+                </p>
+                <p className="mt-1 text-sm text-gray-600">
+                  {r.name} · {r.phone}
+                </p>
+                {(r.email || r.org) && (
+                  <p className="text-xs text-gray-400">
+                    {[r.email, r.org].filter(Boolean).join(" · ")}
+                  </p>
+                )}
+                {r.purpose && (
+                  <p className="mt-1 text-xs text-gray-500">목적: {r.purpose}</p>
+                )}
+                <div className="mt-3 flex gap-2">
+                  {r.status !== "approved" && (
+                    <button
+                      onClick={() => setStatus(r.id, "approved")}
+                      className="flex-1 rounded border border-green-300 py-1.5 text-xs text-green-700 hover:bg-green-50"
                     >
-                      {STATUS_LABEL[r.status]}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">{r.facilityName}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    {r.date} ({weekdayLabel(r.date)})
-                    <br />
-                    {String(r.startHour).padStart(2, "0")}:00~
-                    {String(r.endHour).padStart(2, "0")}:00
-                  </td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    {r.name}
-                    <br />
-                    <span className="text-xs text-gray-400">{r.phone}</span>
-                    {r.email && (
-                      <>
-                        <br />
-                        <span className="text-xs text-gray-400">{r.email}</span>
-                      </>
-                    )}
-                    {r.org && (
-                      <>
-                        <br />
-                        <span className="text-xs text-gray-400">{r.org}</span>
-                      </>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-xs text-gray-500">{r.purpose || "-"}</td>
-                  <td className="px-3 py-2">
-                    <div className="flex justify-end gap-1">
-                      {r.status !== "approved" && (
-                        <button
-                          onClick={() => setStatus(r.id, "approved")}
-                          className="rounded border border-green-300 px-2 py-1 text-xs text-green-700 hover:bg-green-50"
-                        >
-                          승인
-                        </button>
-                      )}
-                      {r.status !== "rejected" && (
-                        <button
-                          onClick={() => setStatus(r.id, "rejected")}
-                          className="rounded border border-amber-300 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
-                        >
-                          거절
-                        </button>
-                      )}
-                      <button
-                        onClick={() => remove(r.id)}
-                        className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                      >
-                        삭제
-                      </button>
-                    </div>
-                  </td>
+                      승인
+                    </button>
+                  )}
+                  {r.status !== "rejected" && (
+                    <button
+                      onClick={() => setStatus(r.id, "rejected")}
+                      className="flex-1 rounded border border-amber-300 py-1.5 text-xs text-amber-700 hover:bg-amber-50"
+                    >
+                      거절
+                    </button>
+                  )}
+                  <button
+                    onClick={() => remove(r.id)}
+                    className="flex-1 rounded border border-red-300 py-1.5 text-xs text-red-600 hover:bg-red-50"
+                  >
+                    삭제
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          {/* 태블릿 이상: 표 */}
+          <div className="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="px-3 py-2">상태</th>
+                  <th className="px-3 py-2">시설</th>
+                  <th className="px-3 py-2">일시</th>
+                  <th className="px-3 py-2">예약자</th>
+                  <th className="px-3 py-2">목적</th>
+                  <th className="px-3 py-2 text-right">처리</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filtered.map((r) => (
+                  <tr key={r.id} className="border-t border-gray-100 align-top">
+                    <td className="px-3 py-2">
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs ${statusStyle[r.status]}`}
+                      >
+                        {STATUS_LABEL[r.status]}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">{r.facilityName}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {r.date} ({weekdayLabel(r.date)})
+                      <br />
+                      {String(r.startHour).padStart(2, "0")}:00~
+                      {String(r.endHour).padStart(2, "0")}:00
+                    </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {r.name}
+                      <br />
+                      <span className="text-xs text-gray-400">{r.phone}</span>
+                      {r.email && (
+                        <>
+                          <br />
+                          <span className="text-xs text-gray-400">{r.email}</span>
+                        </>
+                      )}
+                      {r.org && (
+                        <>
+                          <br />
+                          <span className="text-xs text-gray-400">{r.org}</span>
+                        </>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-gray-500">{r.purpose || "-"}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex justify-end gap-1">
+                        {r.status !== "approved" && (
+                          <button
+                            onClick={() => setStatus(r.id, "approved")}
+                            className="rounded border border-green-300 px-2 py-1 text-xs text-green-700 hover:bg-green-50"
+                          >
+                            승인
+                          </button>
+                        )}
+                        {r.status !== "rejected" && (
+                          <button
+                            onClick={() => setStatus(r.id, "rejected")}
+                            className="rounded border border-amber-300 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
+                          >
+                            거절
+                          </button>
+                        )}
+                        <button
+                          onClick={() => remove(r.id)}
+                          className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
