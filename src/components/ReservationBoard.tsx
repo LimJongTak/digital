@@ -35,6 +35,35 @@ interface Target {
 
 type BookedMap = Record<string, Set<number>>;
 
+type DayStatus =
+  | { kind: "closed" }
+  | { kind: "blocked" }
+  | { kind: "open"; availableCount: number };
+
+function getDayStatus(
+  date: string,
+  hours: number[],
+  booked: Set<number> | undefined,
+  blockedDates: Set<string>,
+): DayStatus {
+  if (isPast(date) || !isWithinBookingWindow(date)) return { kind: "closed" };
+  if (isBlockedForPublic(date) || blockedDates.has(date)) return { kind: "blocked" };
+  const bookedCount = booked?.size ?? 0;
+  return { kind: "open", availableCount: Math.max(0, hours.length - bookedCount) };
+}
+
+/* 모바일 달력 셀에 표시하는 요약 인디케이터 (가능 건수 / 마감 / 휴무) */
+function CellIndicator({ status }: { status: DayStatus }) {
+  if (status.kind === "closed") return null;
+  if (status.kind === "blocked") return <span className="cell_note">휴무</span>;
+  if (status.availableCount === 0) return <span className="cell_dot cell_dot--full">마감</span>;
+  return (
+    <span className="cell_dot cell_dot--open" aria-label={`예약 가능 ${status.availableCount}건`}>
+      {status.availableCount}
+    </span>
+  );
+}
+
 function buildBookedMap(reservations: Reservation[]): BookedMap {
   const map: BookedMap = {};
   for (const r of reservations) {
@@ -89,6 +118,7 @@ export default function ReservationBoard() {
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<{ date: string; startHour: number } | null>(null);
   const [blockedDates, setBlockedDates] = useState<Set<string>>(new Set());
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const targets = useMemo(() => buildTargets(facilities), [facilities]);
 
@@ -138,6 +168,20 @@ export default function ReservationBoard() {
   }, [target]);
 
   const weeks = useMemo(() => buildCalendar(year, month), [year, month]);
+
+  // 모바일 일별 상세 패널: 달력이 바뀌면 첫 예약 가능 날짜를 자동 선택
+  useEffect(() => {
+    if (!target) {
+      setSelectedDate(null);
+      return;
+    }
+    const flat = weeks.flat().filter((d): d is string => !!d);
+    const firstOpenDay = flat.find(
+      (d) => !isPast(d) && isWithinBookingWindow(d) && !isBlockedForPublic(d) && !blockedDates.has(d),
+    );
+    const firstValidDay = flat.find((d) => !isPast(d) && isWithinBookingWindow(d));
+    setSelectedDate(firstOpenDay ?? firstValidDay ?? null);
+  }, [target, weeks, blockedDates]);
 
   function changeMonth(delta: number) {
     let m = month + delta;
@@ -259,28 +303,79 @@ export default function ReservationBoard() {
               <tbody>
                 {weeks.map((week, wi) => (
                   <tr key={wi}>
-                    {week.map((date, di) =>
-                      date ? (
-                        <td key={di} className={date === todayStr ? "today" : undefined}>
+                    {week.map((date, di) => {
+                      if (!date) return <td key={di}>&nbsp;</td>;
+                      const classes = [
+                        date === todayStr ? "today" : "",
+                        date === selectedDate ? "selected" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ");
+                      return (
+                        <td
+                          key={di}
+                          className={classes || undefined}
+                          onClick={() => setSelectedDate(date)}
+                        >
                           <div>
                             <p className="day">{Number(date.split("-")[2])}</p>
-                            <DaySlots
-                              date={date}
-                              hours={hours}
-                              booked={bookedMap[date]}
-                              blockedDates={blockedDates}
-                              onPick={(h) => setModal({ date, startHour: h })}
+                            <div className="cell_slots">
+                              <DaySlots
+                                date={date}
+                                hours={hours}
+                                booked={bookedMap[date]}
+                                blockedDates={blockedDates}
+                                onPick={(h) => setModal({ date, startHour: h })}
+                              />
+                            </div>
+                            <CellIndicator
+                              status={getDayStatus(date, hours, bookedMap[date], blockedDates)}
                             />
                           </div>
                         </td>
-                      ) : (
-                        <td key={di}>&nbsp;</td>
-                      ),
-                    )}
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* 모바일 전용: 선택한 날짜의 예약 가능 시간 패널 */}
+          <div className="day_agenda">
+            {selectedDate ? (
+              (() => {
+                const status = getDayStatus(selectedDate, hours, bookedMap[selectedDate], blockedDates);
+                const d = Number(selectedDate.split("-")[2]);
+                return (
+                  <>
+                    <div className="day_agenda_head">
+                      <b>{month}월 {d}일</b>
+                      <span>({weekdayLabel(selectedDate)})</span>
+                    </div>
+                    {status.kind === "closed" && (
+                      <p className="day_agenda_empty">예약 가능한 기간이 아닙니다.</p>
+                    )}
+                    {status.kind === "blocked" && (
+                      <p className="day_agenda_empty">주말/공휴일은 관리자 예약만 가능합니다.</p>
+                    )}
+                    {status.kind === "open" && (
+                      <div className="day_agenda_slots">
+                        <DaySlots
+                          date={selectedDate}
+                          hours={hours}
+                          booked={bookedMap[selectedDate]}
+                          blockedDates={blockedDates}
+                          onPick={(h) => setModal({ date: selectedDate, startHour: h })}
+                        />
+                      </div>
+                    )}
+                  </>
+                );
+              })()
+            ) : (
+              <p className="day_agenda_empty">날짜를 선택하면 예약 가능한 시간이 표시됩니다.</p>
+            )}
           </div>
         </div>
       )}

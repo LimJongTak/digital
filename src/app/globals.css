@@ -685,6 +685,16 @@ a {
     font-size: 12px;
   }
 }
+/* 모바일: 셀 안에 시간 목록을 전부 나열하면 행 높이가 들쭉날쭉해지므로
+   요약 인디케이터(가능 건수/마감/휴무)만 보여주고, 선택한 날짜의 시간은
+   달력 아래 day_agenda 패널에서 한 번에 보여준다. */
+.cell_dot,
+.cell_note {
+  display: none;
+}
+.day_agenda {
+  display: none;
+}
 @media (max-width: 768px) {
   .resv_calendar .zone {
     height: 60px;
@@ -704,12 +714,111 @@ a {
     font-size: 12px;
     padding: 6px 6px;
   }
-  .calendar_style table td > div p.doc {
-    font-size: 10px;
-    margin: 0 2px 2px;
+}
+/* 태블릿 이하: 셀마다 시간 목록을 나열하면 행 높이가 들쭉날쭉해지므로
+   요약 인디케이터만 보여주고, 선택한 날짜의 시간은 아래 day_agenda 패널에서
+   한 번에 보여준다 (전화기~작은 태블릿 공통, 카드 그리드 1024px 기준과 맞춤). */
+@media (max-width: 1024px) {
+  .calendar_style table td {
+    cursor: pointer;
   }
-  .calendar_style table td > div p.doc a {
-    padding: 2px;
+  .calendar_style table td.selected {
+    background-color: #e2edff;
+  }
+  .calendar_style table td .cell_slots {
+    display: none;
+  }
+  .cell_dot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    margin: 0 auto;
+    border-radius: 50%;
+    font-family: "Montserrat", sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    color: #fff;
+    background-color: #324ba6;
+  }
+  .cell_dot--full {
+    width: auto;
+    height: auto;
+    padding: 3px 5px;
+    border-radius: 4px;
+    font-size: 10px;
+    background-color: #9a9ea3;
+  }
+  .cell_note {
+    display: block;
+    color: #aaa;
+    font-size: 10px;
+    text-align: center;
+  }
+
+  .day_agenda {
+    display: block;
+    margin-top: 16px;
+    padding: 18px;
+    background-color: #f5f8fb;
+    border: 1px solid #e3e9f0;
+    border-radius: 12px;
+  }
+  .day_agenda_head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #e3e9f0;
+  }
+  .day_agenda_head b {
+    font-family: "Montserrat", sans-serif;
+    font-size: 17px;
+    color: #2c2c2c;
+  }
+  .day_agenda_head span {
+    color: #777;
+    font-size: 13px;
+  }
+  .day_agenda_empty {
+    padding: 16px 0;
+    color: #888;
+    font-size: 14px;
+    text-align: center;
+  }
+  .day_agenda_slots {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .day_agenda_slots p.doc {
+    margin: 0;
+    border-radius: 8px;
+    font-size: 13px;
+    text-align: center;
+    color: #fff;
+  }
+  .day_agenda_slots p.doc.pos {
+    background: #324ba6;
+  }
+  .day_agenda_slots p.doc.impos {
+    background: #535456;
+  }
+  .day_agenda_slots p.doc a {
+    display: block;
+    padding: 12px 4px;
+    color: #fff;
+    word-break: keep-all;
+  }
+  .day_agenda_slots p.doc.pos a {
+    cursor: pointer;
+  }
+}
+@media (max-width: 420px) {
+  .day_agenda_slots {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
@@ -1330,6 +1439,16 @@ a {
   border: 1px solid #ddd;
   border-radius: 5px;
   font-size: 15px;
+}
+@media (max-width: 480px) {
+  .form_table th {
+    width: 100px;
+    padding: 14px 12px;
+    font-size: 15px;
+  }
+  .form_table td {
+    padding: 14px 12px;
+  }
 }
 .btn_C_Area {
   margin-top: 30px;
