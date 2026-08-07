@@ -22,6 +22,19 @@ body {
     "맑은 고딕", sans-serif;
 }
 
+/* 콘텐츠가 짧아도 푸터가 항상 뷰포트 하단에 붙도록 고정 */
+#wrap {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+}
+#contents {
+  flex: 1 0 auto;
+}
+#footer {
+  flex-shrink: 0;
+}
+
 a {
   color: inherit;
   text-decoration: none;
