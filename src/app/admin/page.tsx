@@ -439,6 +439,7 @@ function ReservationsAdmin() {
   const [items, setItems] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | ReservationStatus>("all");
+  const [dateFilter, setDateFilter] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -488,13 +489,27 @@ function ReservationsAdmin() {
     setItems((prev) => prev.filter((r) => r.id !== id));
   }
 
-  const filtered = items.filter((r) => filter === "all" || r.status === filter);
+  const filtered = items
+    .filter((r) => filter === "all" || r.status === filter)
+    .filter((r) => !dateFilter || r.date === dateFilter);
+
+  // 날짜순(과거→미래) 정렬 후, 같은 날짜 안에서는 시작 시각순으로 그룹핑한다.
+  const sorted = [...filtered].sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+    return a.startHour - b.startHour;
+  });
+  const groups: { date: string; items: Reservation[] }[] = [];
+  for (const r of sorted) {
+    const g = groups[groups.length - 1];
+    if (g && g.date === r.date) g.items.push(r);
+    else groups.push({ date: r.date, items: [r] });
+  }
 
   if (loading) return <p className="text-gray-500">불러오는 중…</p>;
 
   return (
     <div>
-      <div className="mb-3 flex gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         {(["all", "pending", "approved", "rejected"] as const).map((f) => (
           <button
             key={f}
@@ -506,6 +521,20 @@ function ReservationsAdmin() {
             {f === "all" ? "전체" : STATUS_LABEL[f]}
           </button>
         ))}
+        <input
+          type="date"
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value)}
+          className="rounded-md border border-gray-300 px-2 py-1 text-xs"
+        />
+        {dateFilter && (
+          <button
+            onClick={() => setDateFilter("")}
+            className="text-xs text-blue-600 hover:underline"
+          >
+            날짜 필터 해제
+          </button>
+        )}
         <span className="ml-auto text-xs text-gray-400">총 {filtered.length}건</span>
       </div>
 
@@ -513,117 +542,46 @@ function ReservationsAdmin() {
         <p className="text-sm text-gray-500">예약이 없습니다.</p>
       ) : (
         <>
-          {/* 모바일: 카드 목록 (좁은 화면에서 6열 표는 읽을 수 없으므로) */}
-          <ul className="space-y-3 md:hidden">
-            {filtered.map((r) => (
-              <li key={r.id} className="rounded-lg border border-gray-200 bg-white p-4">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${statusStyle[r.status]}`}
-                  >
-                    {STATUS_LABEL[r.status]}
-                  </span>
-                  <span className="truncate text-sm font-medium text-gray-900">
-                    {r.facilityName}
-                  </span>
-                </div>
-                <p className="text-sm text-gray-900">
-                  {r.date} ({weekdayLabel(r.date)}) {String(r.startHour).padStart(2, "0")}:00~
-                  {String(r.endHour).padStart(2, "0")}:00
+          {/* 모바일: 날짜별 카드 목록 (좁은 화면에서 6열 표는 읽을 수 없으므로) */}
+          <div className="space-y-5 md:hidden">
+            {groups.map((g) => (
+              <div key={g.date}>
+                <p className="mb-2 text-xs font-semibold text-gray-500">
+                  {g.date} ({weekdayLabel(g.date)}) · {g.items.length}건
                 </p>
-                <p className="mt-1 text-sm text-gray-600">
-                  {r.name} · {r.phone}
-                </p>
-                {(r.email || r.org) && (
-                  <p className="text-xs text-gray-400">
-                    {[r.email, r.org].filter(Boolean).join(" · ")}
-                  </p>
-                )}
-                {r.purpose && (
-                  <p className="mt-1 text-xs text-gray-500">목적: {r.purpose}</p>
-                )}
-                <div className="mt-3 flex gap-2">
-                  {r.status !== "approved" && (
-                    <button
-                      onClick={() => setStatus(r.id, "approved")}
-                      className="flex-1 rounded border border-green-300 py-1.5 text-xs text-green-700 hover:bg-green-50"
-                    >
-                      승인
-                    </button>
-                  )}
-                  {r.status !== "rejected" && (
-                    <button
-                      onClick={() => setStatus(r.id, "rejected")}
-                      className="flex-1 rounded border border-amber-300 py-1.5 text-xs text-amber-700 hover:bg-amber-50"
-                    >
-                      거절
-                    </button>
-                  )}
-                  <button
-                    onClick={() => remove(r.id)}
-                    className="flex-1 rounded border border-red-300 py-1.5 text-xs text-red-600 hover:bg-red-50"
-                  >
-                    삭제
-                  </button>
-                </div>
-              </li>
-            ))}
-          </ul>
-
-          {/* 태블릿 이상: 표 */}
-          <div className="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-gray-50 text-gray-600">
-                <tr>
-                  <th className="px-3 py-2">상태</th>
-                  <th className="px-3 py-2">시설</th>
-                  <th className="px-3 py-2">일시</th>
-                  <th className="px-3 py-2">예약자</th>
-                  <th className="px-3 py-2">목적</th>
-                  <th className="px-3 py-2 text-right">처리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r) => (
-                  <tr key={r.id} className="border-t border-gray-100 align-top">
-                    <td className="px-3 py-2">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs ${statusStyle[r.status]}`}
-                      >
-                        {STATUS_LABEL[r.status]}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">{r.facilityName}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      {r.date} ({weekdayLabel(r.date)})
-                      <br />
-                      {String(r.startHour).padStart(2, "0")}:00~
-                      {String(r.endHour).padStart(2, "0")}:00
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      {r.name}
-                      <br />
-                      <span className="text-xs text-gray-400">{r.phone}</span>
-                      {r.email && (
-                        <>
-                          <br />
-                          <span className="text-xs text-gray-400">{r.email}</span>
-                        </>
+                <ul className="space-y-3">
+                  {g.items.map((r) => (
+                    <li key={r.id} className="rounded-lg border border-gray-200 bg-white p-4">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${statusStyle[r.status]}`}
+                        >
+                          {STATUS_LABEL[r.status]}
+                        </span>
+                        <span className="truncate text-sm font-medium text-gray-900">
+                          {r.facilityName}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-900">
+                        {String(r.startHour).padStart(2, "0")}:00~
+                        {String(r.endHour).padStart(2, "0")}:00
+                      </p>
+                      <p className="mt-1 text-sm text-gray-600">
+                        {r.name} · {r.phone}
+                      </p>
+                      {(r.email || r.org) && (
+                        <p className="text-xs text-gray-400">
+                          {[r.email, r.org].filter(Boolean).join(" · ")}
+                        </p>
                       )}
-                      {r.org && (
-                        <>
-                          <br />
-                          <span className="text-xs text-gray-400">{r.org}</span>
-                        </>
+                      {r.purpose && (
+                        <p className="mt-1 text-xs text-gray-500">목적: {r.purpose}</p>
                       )}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-gray-500">{r.purpose || "-"}</td>
-                    <td className="px-3 py-2">
-                      <div className="flex justify-end gap-1">
+                      <div className="mt-3 flex gap-2">
                         {r.status !== "approved" && (
                           <button
                             onClick={() => setStatus(r.id, "approved")}
-                            className="rounded border border-green-300 px-2 py-1 text-xs text-green-700 hover:bg-green-50"
+                            className="flex-1 rounded border border-green-300 py-1.5 text-xs text-green-700 hover:bg-green-50"
                           >
                             승인
                           </button>
@@ -631,22 +589,107 @@ function ReservationsAdmin() {
                         {r.status !== "rejected" && (
                           <button
                             onClick={() => setStatus(r.id, "rejected")}
-                            className="rounded border border-amber-300 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
+                            className="flex-1 rounded border border-amber-300 py-1.5 text-xs text-amber-700 hover:bg-amber-50"
                           >
                             거절
                           </button>
                         )}
                         <button
                           onClick={() => remove(r.id)}
-                          className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                          className="flex-1 rounded border border-red-300 py-1.5 text-xs text-red-600 hover:bg-red-50"
                         >
                           삭제
                         </button>
                       </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+
+          {/* 태블릿 이상: 날짜별로 묶은 표 */}
+          <div className="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white md:block">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-gray-50 text-gray-600">
+                <tr>
+                  <th className="px-3 py-2">상태</th>
+                  <th className="px-3 py-2">시설</th>
+                  <th className="px-3 py-2">시간</th>
+                  <th className="px-3 py-2">예약자</th>
+                  <th className="px-3 py-2">목적</th>
+                  <th className="px-3 py-2 text-right">처리</th>
+                </tr>
+              </thead>
+              {groups.map((g) => (
+                <tbody key={g.date}>
+                  <tr className="border-t border-gray-200 bg-gray-50">
+                    <td colSpan={6} className="px-3 py-1.5 text-xs font-semibold text-gray-600">
+                      {g.date} ({weekdayLabel(g.date)}) · {g.items.length}건
                     </td>
                   </tr>
-                ))}
-              </tbody>
+                  {g.items.map((r) => (
+                    <tr key={r.id} className="border-t border-gray-100 align-top">
+                      <td className="px-3 py-2">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs ${statusStyle[r.status]}`}
+                        >
+                          {STATUS_LABEL[r.status]}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">{r.facilityName}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {String(r.startHour).padStart(2, "0")}:00~
+                        {String(r.endHour).padStart(2, "0")}:00
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {r.name}
+                        <br />
+                        <span className="text-xs text-gray-400">{r.phone}</span>
+                        {r.email && (
+                          <>
+                            <br />
+                            <span className="text-xs text-gray-400">{r.email}</span>
+                          </>
+                        )}
+                        {r.org && (
+                          <>
+                            <br />
+                            <span className="text-xs text-gray-400">{r.org}</span>
+                          </>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-gray-500">{r.purpose || "-"}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex justify-end gap-1">
+                          {r.status !== "approved" && (
+                            <button
+                              onClick={() => setStatus(r.id, "approved")}
+                              className="rounded border border-green-300 px-2 py-1 text-xs text-green-700 hover:bg-green-50"
+                            >
+                              승인
+                            </button>
+                          )}
+                          {r.status !== "rejected" && (
+                            <button
+                              onClick={() => setStatus(r.id, "rejected")}
+                              className="rounded border border-amber-300 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
+                            >
+                              거절
+                            </button>
+                          )}
+                          <button
+                            onClick={() => remove(r.id)}
+                            className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              ))}
             </table>
           </div>
         </>
