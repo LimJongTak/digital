@@ -13,11 +13,12 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { isBlockedForPublic } from "./date";
-import type { BlockedDate, Facility, Reservation, ReservationStatus } from "./types";
+import type { BlockedDate, Facility, Notice, Reservation, ReservationStatus } from "./types";
 
 const FACILITIES = "facilities";
 const RESERVATIONS = "reservations";
 const BLOCKED_DATES = "blockedDates";
+const NOTICES = "notices";
 
 /* ----------------------------- 휴무일(수동 지정) ----------------------------- */
 // 대체공휴일 등 자동 계산 목록에서 누락될 수 있는 날짜를 관리자가 직접 막을 수 있다.
@@ -66,6 +67,56 @@ export async function updateFacility(
 
 export async function deleteFacility(id: string): Promise<void> {
   await deleteDoc(doc(db, FACILITIES, id));
+}
+
+/* ----------------------------- 공지사항 ----------------------------- */
+
+function mapNotice(id: string, data: Record<string, unknown>): Notice {
+  return { id, ...(data as Omit<Notice, "id">) };
+}
+
+// 상단 고정 글이 먼저, 그 다음 최신 글이 먼저 오도록 정렬
+export async function getNotices(): Promise<Notice[]> {
+  const snap = await getDocs(collection(db, NOTICES));
+  return snap.docs
+    .map((d) => mapNotice(d.id, d.data()))
+    .sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return b.createdAt - a.createdAt;
+    });
+}
+
+export async function getNotice(id: string): Promise<Notice | null> {
+  const d = await getDoc(doc(db, NOTICES, id));
+  return d.exists() ? mapNotice(d.id, d.data()) : null;
+}
+
+export interface NewNotice {
+  title: string;
+  content: string;
+  pinned?: boolean;
+}
+
+export async function addNotice(input: NewNotice): Promise<string> {
+  const payload: Omit<Notice, "id"> = {
+    title: input.title,
+    content: input.content,
+    pinned: input.pinned ?? false,
+    createdAt: Date.now(),
+  };
+  const ref = await addDoc(collection(db, NOTICES), payload);
+  return ref.id;
+}
+
+export async function updateNotice(
+  id: string,
+  data: Partial<Pick<Notice, "title" | "content" | "pinned">>,
+): Promise<void> {
+  await updateDoc(doc(db, NOTICES, id), { ...data, updatedAt: Date.now() });
+}
+
+export async function deleteNotice(id: string): Promise<void> {
+  await deleteDoc(doc(db, NOTICES, id));
 }
 
 /* ------------------------------ 예약 ------------------------------ */

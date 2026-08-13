@@ -34,6 +34,15 @@ export interface BlockedDate {
   reason?: string;
 }
 
+export interface Notice {
+  id: string;
+  title: string;
+  content: string;
+  pinned: boolean; // 상단 고정
+  createdAt: number; // epoch ms
+  updatedAt?: number; // epoch ms
+}
+
 export const STATUS_LABEL: Record<ReservationStatus, string> = {
   pending: "승인대기",
   approved: "예약완료",

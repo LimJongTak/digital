@@ -28,5 +28,11 @@ service cloud.firestore {
       allow read: if true;
       allow write: if true;
     }
+
+    // 공지사항: 누구나 읽기 가능, 쓰기는 데모에서 허용 (운영 시 관리자만으로 제한 권장)
+    match /notices/{id} {
+      allow read: if true;
+      allow write: if true;
+    }
   }
 }

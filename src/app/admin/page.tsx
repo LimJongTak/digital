@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { BlockedDate, Facility, Reservation, ReservationStatus } from "@/lib/types";
+import type { BlockedDate, Facility, Notice, Reservation, ReservationStatus } from "@/lib/types";
 import { STATUS_LABEL } from "@/lib/types";
 import {
   getFacilities,
@@ -16,6 +16,10 @@ import {
   getBlockedDates,
   addBlockedDate,
   removeBlockedDate,
+  getNotices,
+  addNotice,
+  updateNotice,
+  deleteNotice,
 } from "@/lib/db";
 import {
   getSiteSettings,
@@ -31,7 +35,14 @@ import ConfigNotice from "@/components/ConfigNotice";
 
 const SESSION_KEY = "admin_authed";
 
-type Tab = "reservations" | "addReservation" | "facilities" | "holidays" | "site" | "password";
+type Tab =
+  | "reservations"
+  | "addReservation"
+  | "facilities"
+  | "holidays"
+  | "notices"
+  | "site"
+  | "password";
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState(false);
@@ -167,6 +178,9 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
         <TabBtn active={tab === "holidays"} onClick={() => setTab("holidays")}>
           휴무일 관리
         </TabBtn>
+        <TabBtn active={tab === "notices"} onClick={() => setTab("notices")}>
+          공지사항 관리
+        </TabBtn>
         <TabBtn active={tab === "site"} onClick={() => setTab("site")}>
           사이트 설정
         </TabBtn>
@@ -178,6 +192,7 @@ function AdminDashboard({ onLogout }: { onLogout: () => void }) {
       {tab === "addReservation" && <AdminAddReservation />}
       {tab === "facilities" && <FacilitiesAdmin />}
       {tab === "holidays" && <HolidaysAdmin />}
+      {tab === "notices" && <NoticesAdmin />}
       {tab === "site" && <SiteSettingsAdmin />}
       {tab === "password" && <PasswordAdmin />}
     </div>
@@ -985,6 +1000,177 @@ function HolidaysAdmin() {
   );
 }
 
+/* --------------------------- 공지사항 관리 --------------------------- */
+
+const emptyNoticeForm = { title: "", content: "", pinned: false };
+
+function NoticesAdmin() {
+  const [items, setItems] = useState<Notice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyNoticeForm);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setItems(await getNotices());
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  function startEdit(n: Notice) {
+    setEditingId(n.id);
+    setForm({ title: n.title, content: n.content, pinned: n.pinned });
+    setMsg(null);
+  }
+
+  function startNew() {
+    setEditingId(null);
+    setForm(emptyNoticeForm);
+    setMsg(null);
+  }
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    if (!form.title.trim() || !form.content.trim()) {
+      setMsg({ type: "err", text: "제목과 내용을 입력하세요." });
+      return;
+    }
+    setSaving(true);
+    try {
+      if (editingId) {
+        await updateNotice(editingId, {
+          title: form.title.trim(),
+          content: form.content.trim(),
+          pinned: form.pinned,
+        });
+        setMsg({ type: "ok", text: "수정되었습니다." });
+      } else {
+        await addNotice({
+          title: form.title.trim(),
+          content: form.content.trim(),
+          pinned: form.pinned,
+        });
+        setMsg({ type: "ok", text: "등록되었습니다." });
+      }
+      startNew();
+      await load();
+    } catch (e2) {
+      setMsg({ type: "err", text: e2 instanceof Error ? e2.message : "저장에 실패했습니다." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(id: string) {
+    if (!confirm("이 공지사항을 삭제하시겠습니까?")) return;
+    await deleteNotice(id);
+    if (editingId === id) startNew();
+    await load();
+  }
+
+  return (
+    <div className="grid gap-6 md:grid-cols-2">
+      {/* 목록 */}
+      <div>
+        <h2 className="mb-3 font-semibold text-gray-900">공지사항 목록</h2>
+        {loading ? (
+          <p className="text-sm text-gray-500">불러오는 중…</p>
+        ) : items.length === 0 ? (
+          <p className="text-sm text-gray-500">등록된 공지사항이 없습니다.</p>
+        ) : (
+          <ul className="space-y-2">
+            {items.map((n) => (
+              <li key={n.id} className="rounded-lg border border-gray-200 bg-white p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    {n.pinned && (
+                      <span className="mr-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
+                        고정
+                      </span>
+                    )}
+                    <span className="font-medium text-gray-900">{n.title}</span>
+                  </div>
+                  <div className="flex shrink-0 gap-2 text-xs">
+                    <button onClick={() => startEdit(n)} className="text-blue-600 hover:underline">
+                      수정
+                    </button>
+                    <button onClick={() => remove(n.id)} className="text-red-500 hover:underline">
+                      삭제
+                    </button>
+                  </div>
+                </div>
+                <p className="mt-1 line-clamp-2 text-xs text-gray-500 whitespace-pre-wrap">
+                  {n.content}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* 작성/수정 폼 */}
+      <div>
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-semibold text-gray-900">
+            {editingId ? "공지사항 수정" : "공지사항 작성"}
+          </h2>
+          {editingId && (
+            <button onClick={startNew} className="text-xs text-gray-500 hover:underline">
+              새 글 작성으로
+            </button>
+          )}
+        </div>
+        <form onSubmit={submit} className="space-y-3 rounded-lg border border-gray-200 bg-white p-4">
+          <Field label="제목">
+            <input
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
+          </Field>
+          <Field label="내용">
+            <textarea
+              value={form.content}
+              onChange={(e) => setForm({ ...form, content: e.target.value })}
+              rows={8}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            />
+          </Field>
+          <label className="flex items-center gap-2 text-sm text-gray-600">
+            <input
+              type="checkbox"
+              checked={form.pinned}
+              onChange={(e) => setForm({ ...form, pinned: e.target.checked })}
+            />
+            상단 고정
+          </label>
+          {msg && (
+            <p className={`text-sm ${msg.type === "ok" ? "text-green-600" : "text-red-600"}`}>
+              {msg.text}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={saving}
+            className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            {saving ? "저장 중…" : editingId ? "수정 저장" : "등록"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 /* --------------------------- 시설 관리 --------------------------- */
 
 function FacilitiesAdmin() {
@@ -1041,6 +1227,12 @@ function FacilitiesAdmin() {
     await load();
   }
 
+  async function changeCapacity(f: Facility, val: number) {
+    if (!Number.isFinite(val) || val < 1) return;
+    await updateFacility(f.id, { capacity: val });
+    setItems((prev) => prev.map((x) => (x.id === f.id ? { ...x, capacity: val } : x)));
+  }
+
   async function seed() {
     const n = await seedFacilitiesIfEmpty();
     if (n === 0) alert("이미 시설이 존재합니다.");
@@ -1074,10 +1266,7 @@ function FacilitiesAdmin() {
                 className="rounded-lg border border-gray-200 bg-white p-3"
               >
                 <div className="flex items-center justify-between">
-                  <div>
-                    <span className="font-medium text-gray-900">{f.name}</span>
-                    <span className="ml-2 text-xs text-gray-400">{f.capacity}인</span>
-                  </div>
+                  <span className="font-medium text-gray-900">{f.name}</span>
                   <button
                     onClick={() => remove(f.id)}
                     className="text-xs text-red-500 hover:underline"
@@ -1088,6 +1277,18 @@ function FacilitiesAdmin() {
                 {f.description && (
                   <p className="mt-1 text-xs text-gray-500">{f.description}</p>
                 )}
+                <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                  정원
+                  <input
+                    key={`${f.id}-${f.capacity}`}
+                    type="number"
+                    min={1}
+                    defaultValue={f.capacity}
+                    onBlur={(e) => changeCapacity(f, Number(e.target.value))}
+                    className="w-16 rounded-md border border-gray-300 px-2 py-1 text-sm"
+                  />
+                  인
+                </div>
                 <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
                   운영시간
                   <HourSelect

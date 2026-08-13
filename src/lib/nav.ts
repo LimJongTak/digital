@@ -19,6 +19,11 @@ export const NAV: NavSection[] = [
     ],
   },
   {
+    title: "공지사항",
+    href: "/notice",
+    items: [{ label: "공지사항", href: "/notice" }],
+  },
+  {
     title: "AI인재양성부트캠프사업단",
     href: "https://www.scnu.ac.kr/scnuai/main.do",
     items: [
@@ -32,10 +37,18 @@ export function isExternalHref(href: string): boolean {
   return href.startsWith("http://") || href.startsWith("https://");
 }
 
-// 현재 경로가 속한 섹션 찾기
+// 현재 경로가 속한 섹션 찾기 (예: /notice/abc 는 /notice 메뉴에 속함)
 export function findSection(pathname: string): NavSection | null {
   for (const sec of NAV) {
-    if (sec.items.some((it) => it.href === pathname)) return sec;
+    if (
+      sec.items.some(
+        (it) =>
+          !isExternalHref(it.href) &&
+          (pathname === it.href || pathname.startsWith(`${it.href}/`)),
+      )
+    ) {
+      return sec;
+    }
   }
   return null;
 }
