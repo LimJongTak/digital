@@ -34,6 +34,12 @@ export interface BlockedDate {
   reason?: string;
 }
 
+// 주말/공휴일이지만 관리자가 예외적으로 예약 가능하게 열어둔 날짜
+export interface OpenDate {
+  date: string; // "YYYY-MM-DD"
+  reason?: string;
+}
+
 export interface Notice {
   id: string;
   title: string;

@@ -9,6 +9,7 @@ import {
   createReservation,
   createComboReservation,
   getBlockedDates,
+  getOpenDates,
 } from "@/lib/db";
 import {
   WEEKDAYS,
@@ -40,14 +41,25 @@ type DayStatus =
   | { kind: "blocked" }
   | { kind: "open"; availableCount: number };
 
+// 주말/공휴일(자동) + 관리자 수동 휴무일을 합치되, 관리자가 예외 개방(openDates)한 날짜는 제외한다.
+function isEffectivelyBlocked(
+  date: string,
+  blockedDates: Set<string>,
+  openDates: Set<string>,
+): boolean {
+  if (blockedDates.has(date)) return true;
+  return isBlockedForPublic(date) && !openDates.has(date);
+}
+
 function getDayStatus(
   date: string,
   hours: number[],
   booked: Set<number> | undefined,
   blockedDates: Set<string>,
+  openDates: Set<string>,
 ): DayStatus {
   if (isPast(date) || !isWithinBookingWindow(date)) return { kind: "closed" };
-  if (isBlockedForPublic(date) || blockedDates.has(date)) return { kind: "blocked" };
+  if (isEffectivelyBlocked(date, blockedDates, openDates)) return { kind: "blocked" };
   const bookedCount = booked?.size ?? 0;
   return { kind: "open", availableCount: Math.max(0, hours.length - bookedCount) };
 }
@@ -118,6 +130,7 @@ export default function ReservationBoard() {
   const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<{ date: string; startHour: number } | null>(null);
   const [blockedDates, setBlockedDates] = useState<Set<string>>(new Set());
+  const [openDates, setOpenDates] = useState<Set<string>>(new Set());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const targets = useMemo(() => buildTargets(facilities), [facilities]);
@@ -130,9 +143,14 @@ export default function ReservationBoard() {
   useEffect(() => {
     (async () => {
       try {
-        const [fs, blocked] = await Promise.all([getFacilities(), getBlockedDates()]);
+        const [fs, blocked, opened] = await Promise.all([
+          getFacilities(),
+          getBlockedDates(),
+          getOpenDates(),
+        ]);
         setFacilities(fs);
         setBlockedDates(new Set(blocked.map((b) => b.date)));
+        setOpenDates(new Set(opened.map((o) => o.date)));
         if (fs.length) setTargetId(fs[0].id);
       } catch (e) {
         setError((e as Error).message);
@@ -177,11 +195,11 @@ export default function ReservationBoard() {
     }
     const flat = weeks.flat().filter((d): d is string => !!d);
     const firstOpenDay = flat.find(
-      (d) => !isPast(d) && isWithinBookingWindow(d) && !isBlockedForPublic(d) && !blockedDates.has(d),
+      (d) => !isPast(d) && isWithinBookingWindow(d) && !isEffectivelyBlocked(d, blockedDates, openDates),
     );
     const firstValidDay = flat.find((d) => !isPast(d) && isWithinBookingWindow(d));
     setSelectedDate(firstOpenDay ?? firstValidDay ?? null);
-  }, [target, weeks, blockedDates]);
+  }, [target, weeks, blockedDates, openDates]);
 
   function changeMonth(delta: number) {
     let m = month + delta;
@@ -325,11 +343,12 @@ export default function ReservationBoard() {
                                 hours={hours}
                                 booked={bookedMap[date]}
                                 blockedDates={blockedDates}
+                                openDates={openDates}
                                 onPick={(h) => setModal({ date, startHour: h })}
                               />
                             </div>
                             <CellIndicator
-                              status={getDayStatus(date, hours, bookedMap[date], blockedDates)}
+                              status={getDayStatus(date, hours, bookedMap[date], blockedDates, openDates)}
                             />
                           </div>
                         </td>
@@ -345,7 +364,7 @@ export default function ReservationBoard() {
           <div className="day_agenda">
             {selectedDate ? (
               (() => {
-                const status = getDayStatus(selectedDate, hours, bookedMap[selectedDate], blockedDates);
+                const status = getDayStatus(selectedDate, hours, bookedMap[selectedDate], blockedDates, openDates);
                 const d = Number(selectedDate.split("-")[2]);
                 return (
                   <>
@@ -366,6 +385,7 @@ export default function ReservationBoard() {
                           hours={hours}
                           booked={bookedMap[selectedDate]}
                           blockedDates={blockedDates}
+                          openDates={openDates}
                           onPick={(h) => setModal({ date: selectedDate, startHour: h })}
                         />
                       </div>
@@ -403,16 +423,18 @@ function DaySlots({
   hours,
   booked,
   blockedDates,
+  openDates,
   onPick,
 }: {
   date: string;
   hours: number[];
   booked?: Set<number>;
   blockedDates: Set<string>;
+  openDates: Set<string>;
   onPick: (hour: number) => void;
 }) {
   if (isPast(date) || !isWithinBookingWindow(date)) return null;
-  if (isBlockedForPublic(date) || blockedDates.has(date)) {
+  if (isEffectivelyBlocked(date, blockedDates, openDates)) {
     return <p className="doc impos">주말/공휴일은 관리자 예약만 가능합니다</p>;
   }
   return (

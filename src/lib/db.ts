@@ -13,11 +13,12 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { isBlockedForPublic } from "./date";
-import type { BlockedDate, Facility, Notice, Reservation, ReservationStatus } from "./types";
+import type { BlockedDate, Facility, Notice, OpenDate, Reservation, ReservationStatus } from "./types";
 
 const FACILITIES = "facilities";
 const RESERVATIONS = "reservations";
 const BLOCKED_DATES = "blockedDates";
+const OPEN_DATES = "openDates";
 const NOTICES = "notices";
 
 /* ----------------------------- 휴무일(수동 지정) ----------------------------- */
@@ -39,11 +40,32 @@ export async function removeBlockedDate(date: string): Promise<void> {
   await deleteDoc(doc(db, BLOCKED_DATES, date));
 }
 
+/* --------------------------- 휴무일(자동) 예외 개방 --------------------------- */
+// 주말/공휴일처럼 자동으로 휴무 처리되는 날짜를 관리자가 예외적으로 예약 가능하게 열어둔다.
+
+export async function getOpenDates(): Promise<OpenDate[]> {
+  const snap = await getDocs(collection(db, OPEN_DATES));
+  return snap.docs
+    .map((d) => d.data() as OpenDate)
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
+export async function addOpenDate(date: string, reason?: string): Promise<void> {
+  await setDoc(doc(db, OPEN_DATES, date), { date, reason: reason ?? "" });
+}
+
+export async function removeOpenDate(date: string): Promise<void> {
+  await deleteDoc(doc(db, OPEN_DATES, date));
+}
+
 // 주말/공휴일(자동) + 관리자가 수동 지정한 휴무일을 함께 확인한다.
+// 단, 자동 휴무일이라도 관리자가 예외 개방(openDates)해 두었다면 예약을 허용한다.
 async function isDateBlockedForPublic(date: string): Promise<boolean> {
-  if (isBlockedForPublic(date)) return true;
-  const snap = await getDoc(doc(db, BLOCKED_DATES, date));
-  return snap.exists();
+  const blocked = await getDoc(doc(db, BLOCKED_DATES, date));
+  if (blocked.exists()) return true;
+  if (!isBlockedForPublic(date)) return false;
+  const opened = await getDoc(doc(db, OPEN_DATES, date));
+  return !opened.exists();
 }
 
 /* ------------------------------- 시설 ------------------------------- */

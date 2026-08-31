@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { BlockedDate, Facility, Notice, Reservation, ReservationStatus } from "@/lib/types";
+import type { BlockedDate, Facility, Notice, OpenDate, Reservation, ReservationStatus } from "@/lib/types";
 import { STATUS_LABEL } from "@/lib/types";
 import {
   getFacilities,
@@ -16,6 +16,9 @@ import {
   getBlockedDates,
   addBlockedDate,
   removeBlockedDate,
+  getOpenDates,
+  addOpenDate,
+  removeOpenDate,
   getNotices,
   addNotice,
   updateNotice,
@@ -30,7 +33,7 @@ import {
   type SiteSettings,
 } from "@/lib/settings";
 import { isFirebaseConfigured } from "@/lib/firebase";
-import { weekdayLabel, isBlockedForPublic } from "@/lib/date";
+import { weekdayLabel, isBlockedForPublic, toDateStr, daysInMonth } from "@/lib/date";
 import ConfigNotice from "@/components/ConfigNotice";
 
 const SESSION_KEY = "admin_authed";
@@ -450,11 +453,19 @@ const statusStyle: Record<string, string> = {
   rejected: "bg-gray-100 text-gray-500",
 };
 
+// 기본 조회 기간: 오늘 ~ 이번 달 말일 (지난 예약은 기본적으로 숨김)
+function defaultReservationRange(): { start: string; end: string } {
+  const today = new Date();
+  const monthDays = daysInMonth(today.getFullYear(), today.getMonth() + 1);
+  return { start: toDateStr(today), end: monthDays[monthDays.length - 1] };
+}
+
 function ReservationsAdmin() {
   const [items, setItems] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | ReservationStatus>("all");
-  const [dateFilter, setDateFilter] = useState("");
+  const [rangeStart, setRangeStart] = useState(() => defaultReservationRange().start);
+  const [rangeEnd, setRangeEnd] = useState(() => defaultReservationRange().end);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -504,9 +515,13 @@ function ReservationsAdmin() {
     setItems((prev) => prev.filter((r) => r.id !== id));
   }
 
+  const isDefaultRange =
+    rangeStart === defaultReservationRange().start && rangeEnd === defaultReservationRange().end;
+
   const filtered = items
     .filter((r) => filter === "all" || r.status === filter)
-    .filter((r) => !dateFilter || r.date === dateFilter);
+    .filter((r) => !rangeStart || r.date >= rangeStart)
+    .filter((r) => !rangeEnd || r.date <= rangeEnd);
 
   // 날짜순(과거→미래) 정렬 후, 같은 날짜 안에서는 시작 시각순으로 그룹핑한다.
   const sorted = [...filtered].sort((a, b) => {
@@ -536,18 +551,42 @@ function ReservationsAdmin() {
             {f === "all" ? "전체" : STATUS_LABEL[f]}
           </button>
         ))}
-        <input
-          type="date"
-          value={dateFilter}
-          onChange={(e) => setDateFilter(e.target.value)}
-          className="rounded-md border border-gray-300 px-2 py-1 text-xs"
-        />
-        {dateFilter && (
+        <div className="flex items-center gap-1">
+          <input
+            type="date"
+            value={rangeStart}
+            onChange={(e) => setRangeStart(e.target.value)}
+            className="rounded-md border border-gray-300 px-2 py-1 text-xs"
+          />
+          <span className="text-xs text-gray-400">~</span>
+          <input
+            type="date"
+            value={rangeEnd}
+            onChange={(e) => setRangeEnd(e.target.value)}
+            className="rounded-md border border-gray-300 px-2 py-1 text-xs"
+          />
+        </div>
+        {!isDefaultRange && (
           <button
-            onClick={() => setDateFilter("")}
+            onClick={() => {
+              const d = defaultReservationRange();
+              setRangeStart(d.start);
+              setRangeEnd(d.end);
+            }}
             className="text-xs text-blue-600 hover:underline"
           >
-            날짜 필터 해제
+            이번 달로
+          </button>
+        )}
+        {(rangeStart || rangeEnd) && (
+          <button
+            onClick={() => {
+              setRangeStart("");
+              setRangeEnd("");
+            }}
+            className="text-xs text-gray-500 hover:underline"
+          >
+            전체 기간 (지난 예약 포함)
           </button>
         )}
         <span className="ml-auto text-xs text-gray-400">총 {filtered.length}건</span>
@@ -932,6 +971,7 @@ function HolidaysAdmin() {
   }
 
   return (
+    <>
     <div className="max-w-lg">
       <p className="mb-4 text-sm text-gray-500">
         설날/추석 등 대체공휴일이 자동 목록에 반영되지 않았거나, 임시 휴무가 필요할 때 날짜를
@@ -988,6 +1028,128 @@ function HolidaysAdmin() {
               </div>
               <button
                 onClick={() => remove(b.date)}
+                className="text-xs text-red-500 hover:underline"
+              >
+                해제
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+    <OpenDatesAdmin />
+    </>
+  );
+}
+
+/* ----------------------- 주말/공휴일 예외 개방 관리 ----------------------- */
+
+function OpenDatesAdmin() {
+  const [items, setItems] = useState<OpenDate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [date, setDate] = useState("");
+  const [reason, setReason] = useState("");
+  const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      setItems(await getOpenDates());
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    if (!date) {
+      setMsg({ type: "err", text: "날짜를 선택하세요." });
+      return;
+    }
+    if (!isBlockedForPublic(date)) {
+      setMsg({ type: "err", text: "주말/공휴일이 아닌 날짜는 이미 예약이 가능합니다." });
+      return;
+    }
+    if (items.some((o) => o.date === date)) {
+      setMsg({ type: "err", text: "이미 개방된 날짜입니다." });
+      return;
+    }
+    await addOpenDate(date, reason.trim());
+    setDate("");
+    setReason("");
+    setMsg({ type: "ok", text: "예약 가능일로 변경되었습니다." });
+    await load();
+  }
+
+  async function remove(d: string) {
+    if (!confirm(`${d} 예외 개방을 취소하고 다시 휴무일로 되돌리시겠습니까?`)) return;
+    await removeOpenDate(d);
+    await load();
+  }
+
+  return (
+    <div className="mt-8 max-w-lg">
+      <h2 className="mb-1 font-semibold text-gray-900">휴무일 → 예약 가능일 전환</h2>
+      <p className="mb-4 text-sm text-gray-500">
+        주말이나 법정공휴일이라도 특별히 개방이 필요하면 날짜를 지정하세요. 지정된 날짜는
+        일반 사용자도 평일과 동일하게 예약할 수 있습니다.
+      </p>
+      <form
+        onSubmit={add}
+        className="mb-6 space-y-3 rounded-lg border border-gray-200 bg-white p-4"
+      >
+        <Field label="날짜">
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+          />
+        </Field>
+        <Field label="사유 (선택)">
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="예: 특별 행사 운영"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+          />
+        </Field>
+        {msg && (
+          <p className={`text-sm ${msg.type === "ok" ? "text-green-600" : "text-red-600"}`}>
+            {msg.text}
+          </p>
+        )}
+        <button
+          type="submit"
+          className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          예약 가능일로 전환
+        </button>
+      </form>
+
+      <h2 className="mb-2 font-semibold text-gray-900">개방된 휴무일</h2>
+      {loading ? (
+        <p className="text-sm text-gray-500">불러오는 중…</p>
+      ) : items.length === 0 ? (
+        <p className="text-sm text-gray-500">예외로 개방한 날짜가 없습니다.</p>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((o) => (
+            <li
+              key={o.date}
+              className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3"
+            >
+              <div>
+                <span className="font-medium text-gray-900">{o.date}</span>
+                {o.reason && <span className="ml-2 text-xs text-gray-400">{o.reason}</span>}
+              </div>
+              <button
+                onClick={() => remove(o.date)}
                 className="text-xs text-red-500 hover:underline"
               >
                 해제

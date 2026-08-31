@@ -22,6 +22,12 @@ service cloud.firestore {
       allow write: if true;
     }
 
+    // 주말/공휴일 예외 개방일: 누구나 읽기(예약 화면에서 확인), 쓰기는 데모에서 허용
+    match /openDates/{date} {
+      allow read: if true;
+      allow write: if true;
+    }
+
     // 사이트 설정/관리자 계정 (데모: 누구나 읽기/쓰기).
     // 운영 시 settings/admin 은 Firebase Auth 관리자만 읽기/쓰기하도록 제한하세요.
     match /settings/{id} {
