@@ -23,6 +23,7 @@ import {
 } from "@/lib/date";
 
 const COMBO_ID = "__combo_zone1_2__";
+const COMBO_ALL_ID = "__combo_all__";
 
 interface Target {
   id: string;
@@ -104,6 +105,7 @@ function buildTargets(facilities: Facility[]): Target[] {
 
   const zone1 = facilities.find((f) => f.name === "Co-Work Zone 1");
   const zone2 = facilities.find((f) => f.name === "Co-Work Zone 2");
+  const dataIdea = facilities.find((f) => f.name === "Data & Idea Zone");
   if (zone1 && zone2) {
     targets.push({
       id: COMBO_ID,
@@ -113,6 +115,18 @@ function buildTargets(facilities: Facility[]): Target[] {
       openHour: Math.max(zone1.openHour, zone2.openHour),
       closeHour: Math.min(zone1.closeHour, zone2.closeHour),
       facilities: [zone1, zone2],
+    });
+  }
+  if (zone1 && zone2 && dataIdea) {
+    const all = [zone1, zone2, dataIdea];
+    targets.push({
+      id: COMBO_ALL_ID,
+      name: "전체 통합 (Zone 1+2+Data&Idea)",
+      capacity: all.reduce((sum, f) => sum + f.capacity, 0),
+      description: "Co-Work Zone 1, 2, Data & Idea Zone 전체를 통합해 예약합니다\n센터 전체 대관/대규모 행사에 적합",
+      openHour: Math.max(...all.map((f) => f.openHour)),
+      closeHour: Math.min(...all.map((f) => f.closeHour)),
+      facilities: all,
     });
   }
   return targets;
