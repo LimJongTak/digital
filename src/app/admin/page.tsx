@@ -453,6 +453,39 @@ const statusStyle: Record<string, string> = {
   rejected: "bg-gray-100 text-gray-500",
 };
 
+// 관리자 목록의 한 행. 통합 예약(groupId 공유)은 여러 예약을 한 행으로 묶는다.
+interface ReservationRow {
+  key: string;
+  r: Reservation; // 대표 예약 (날짜/시간/예약자 정보 표시용)
+  members: Reservation[];
+  facilityLabel: string;
+}
+
+const COMBO_SUFFIX = " (통합예약)";
+
+function toReservationRows(list: Reservation[]): ReservationRow[] {
+  const rows: ReservationRow[] = [];
+  const byGroup = new Map<string, ReservationRow>();
+  for (const r of list) {
+    const existing = r.groupId ? byGroup.get(r.groupId) : undefined;
+    if (existing) {
+      existing.members.push(r);
+      continue;
+    }
+    const row: ReservationRow = { key: r.groupId ?? r.id, r, members: [r], facilityLabel: "" };
+    if (r.groupId) byGroup.set(r.groupId, row);
+    rows.push(row);
+  }
+  for (const row of rows) {
+    row.facilityLabel =
+      row.members.length > 1
+        ? row.members.map((m) => m.facilityName.replace(COMBO_SUFFIX, "")).join(" + ") +
+          COMBO_SUFFIX
+        : row.r.facilityName;
+  }
+  return rows;
+}
+
 // 기본 조회 기간: 오늘 ~ 이번 달 말일 (지난 예약은 기본적으로 숨김)
 function defaultReservationRange(): { start: string; end: string } {
   const today = new Date();
@@ -480,20 +513,25 @@ function ReservationsAdmin() {
     load();
   }, [load]);
 
-  async function setStatus(id: string, status: ReservationStatus) {
-    await updateReservationStatus(id, status);
-    setItems((prev) => prev.map((r) => (r.id === id ? { ...r, status } : r)));
+  // 통합 예약은 묶인 예약 전체를 한 번에 처리하고, 알림 메일은 한 통만 보낸다.
+  async function setStatus(
+    row: Pick<ReservationRow, "members" | "facilityLabel">,
+    status: ReservationStatus,
+  ) {
+    const ids = row.members.map((m) => m.id);
+    await Promise.all(ids.map((id) => updateReservationStatus(id, status)));
+    setItems((prev) => prev.map((r) => (ids.includes(r.id) ? { ...r, status } : r)));
 
     if (status !== "approved" && status !== "rejected") return;
-    const r = items.find((x) => x.id === id);
-    if (!r?.email) return;
+    const r = row.members[0];
+    if (!r.email) return;
     try {
       const res = await fetch("/api/notify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: r.email,
-          facilityName: r.facilityName,
+          facilityName: row.facilityLabel,
           date: r.date,
           startHour: r.startHour,
           endHour: r.endHour,
@@ -509,10 +547,15 @@ function ReservationsAdmin() {
     }
   }
 
-  async function remove(id: string) {
-    if (!confirm("이 예약을 완전히 삭제하시겠습니까?")) return;
-    await deleteReservation(id);
-    setItems((prev) => prev.filter((r) => r.id !== id));
+  async function remove(members: Reservation[]) {
+    const msg =
+      members.length > 1
+        ? `통합예약 ${members.length}건을 모두 완전히 삭제하시겠습니까?`
+        : "이 예약을 완전히 삭제하시겠습니까?";
+    if (!confirm(msg)) return;
+    const ids = members.map((m) => m.id);
+    await Promise.all(ids.map((id) => deleteReservation(id)));
+    setItems((prev) => prev.filter((r) => !ids.includes(r.id)));
   }
 
   const isDefaultRange =
@@ -528,11 +571,12 @@ function ReservationsAdmin() {
     if (a.date !== b.date) return a.date < b.date ? -1 : 1;
     return a.startHour - b.startHour;
   });
-  const groups: { date: string; items: Reservation[] }[] = [];
-  for (const r of sorted) {
+  const rows = toReservationRows(sorted);
+  const groups: { date: string; items: ReservationRow[] }[] = [];
+  for (const row of rows) {
     const g = groups[groups.length - 1];
-    if (g && g.date === r.date) g.items.push(r);
-    else groups.push({ date: r.date, items: [r] });
+    if (g && g.date === row.r.date) g.items.push(row);
+    else groups.push({ date: row.r.date, items: [row] });
   }
 
   if (loading) return <p className="text-gray-500">불러오는 중…</p>;
@@ -589,7 +633,7 @@ function ReservationsAdmin() {
             전체 기간 (지난 예약 포함)
           </button>
         )}
-        <span className="ml-auto text-xs text-gray-400">총 {filtered.length}건</span>
+        <span className="ml-auto text-xs text-gray-400">총 {rows.length}건</span>
       </div>
 
       {filtered.length === 0 ? (
@@ -604,8 +648,8 @@ function ReservationsAdmin() {
                   {g.date} ({weekdayLabel(g.date)}) · {g.items.length}건
                 </p>
                 <ul className="space-y-3">
-                  {g.items.map((r) => (
-                    <li key={r.id} className="rounded-lg border border-gray-200 bg-white p-4">
+                  {g.items.map(({ key, r, members, facilityLabel }) => (
+                    <li key={key} className="rounded-lg border border-gray-200 bg-white p-4">
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <span
                           className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${statusStyle[r.status]}`}
@@ -613,7 +657,7 @@ function ReservationsAdmin() {
                           {STATUS_LABEL[r.status]}
                         </span>
                         <span className="truncate text-sm font-medium text-gray-900">
-                          {r.facilityName}
+                          {facilityLabel}
                         </span>
                       </div>
                       <p className="text-sm text-gray-900">
@@ -634,7 +678,7 @@ function ReservationsAdmin() {
                       <div className="mt-3 flex gap-2">
                         {r.status !== "approved" && (
                           <button
-                            onClick={() => setStatus(r.id, "approved")}
+                            onClick={() => setStatus({ members, facilityLabel }, "approved")}
                             className="flex-1 rounded border border-green-300 py-1.5 text-xs text-green-700 hover:bg-green-50"
                           >
                             승인
@@ -642,14 +686,14 @@ function ReservationsAdmin() {
                         )}
                         {r.status !== "rejected" && (
                           <button
-                            onClick={() => setStatus(r.id, "rejected")}
+                            onClick={() => setStatus({ members, facilityLabel }, "rejected")}
                             className="flex-1 rounded border border-amber-300 py-1.5 text-xs text-amber-700 hover:bg-amber-50"
                           >
                             거절
                           </button>
                         )}
                         <button
-                          onClick={() => remove(r.id)}
+                          onClick={() => remove(members)}
                           className="flex-1 rounded border border-red-300 py-1.5 text-xs text-red-600 hover:bg-red-50"
                         >
                           삭제
@@ -682,8 +726,8 @@ function ReservationsAdmin() {
                       {g.date} ({weekdayLabel(g.date)}) · {g.items.length}건
                     </td>
                   </tr>
-                  {g.items.map((r) => (
-                    <tr key={r.id} className="border-t border-gray-100 align-top">
+                  {g.items.map(({ key, r, members, facilityLabel }) => (
+                    <tr key={key} className="border-t border-gray-100 align-top">
                       <td className="px-3 py-2">
                         <span
                           className={`rounded-full px-2 py-0.5 text-xs ${statusStyle[r.status]}`}
@@ -691,7 +735,7 @@ function ReservationsAdmin() {
                           {STATUS_LABEL[r.status]}
                         </span>
                       </td>
-                      <td className="px-3 py-2 whitespace-nowrap">{r.facilityName}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{facilityLabel}</td>
                       <td className="px-3 py-2 whitespace-nowrap">
                         {String(r.startHour).padStart(2, "0")}:00~
                         {String(r.endHour).padStart(2, "0")}:00
@@ -718,7 +762,7 @@ function ReservationsAdmin() {
                         <div className="flex justify-end gap-1">
                           {r.status !== "approved" && (
                             <button
-                              onClick={() => setStatus(r.id, "approved")}
+                              onClick={() => setStatus({ members, facilityLabel }, "approved")}
                               className="rounded border border-green-300 px-2 py-1 text-xs text-green-700 hover:bg-green-50"
                             >
                               승인
@@ -726,14 +770,14 @@ function ReservationsAdmin() {
                           )}
                           {r.status !== "rejected" && (
                             <button
-                              onClick={() => setStatus(r.id, "rejected")}
+                              onClick={() => setStatus({ members, facilityLabel }, "rejected")}
                               className="rounded border border-amber-300 px-2 py-1 text-xs text-amber-700 hover:bg-amber-50"
                             >
                               거절
                             </button>
                           )}
                           <button
-                            onClick={() => remove(r.id)}
+                            onClick={() => remove(members)}
                             className="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
                           >
                             삭제
