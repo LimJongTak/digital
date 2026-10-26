@@ -145,7 +145,6 @@ export default function ReservationBoard() {
   const [modal, setModal] = useState<{ date: string; startHour: number } | null>(null);
   const [blockedDates, setBlockedDates] = useState<Set<string>>(new Set());
   const [openDates, setOpenDates] = useState<Set<string>>(new Set());
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   const targets = useMemo(() => buildTargets(facilities), [facilities]);
 
@@ -176,14 +175,12 @@ export default function ReservationBoard() {
 
   const loadReservations = useCallback(async () => {
     if (!target) return;
-    try {
-      const lists = await Promise.all(
-        target.facilities.map((f) => getReservationsByMonth(f.id, year, month)),
-      );
-      setReservations(lists.flat());
-    } catch (e) {
-      setError((e as Error).message);
-    }
+    await Promise.all(
+      target.facilities.map((f) => getReservationsByMonth(f.id, year, month)),
+    ).then(
+      (lists) => setReservations(lists.flat()),
+      (e) => setError((e as Error).message),
+    );
   }, [target, year, month]);
 
   useEffect(() => {
@@ -202,18 +199,23 @@ export default function ReservationBoard() {
   const weeks = useMemo(() => buildCalendar(year, month), [year, month]);
 
   // 모바일 일별 상세 패널: 달력이 바뀌면 첫 예약 가능 날짜를 자동 선택
-  useEffect(() => {
-    if (!target) {
-      setSelectedDate(null);
-      return;
-    }
+  const defaultSelection = useMemo(() => {
+    if (!target) return { date: null };
     const flat = weeks.flat().filter((d): d is string => !!d);
     const firstOpenDay = flat.find(
       (d) => !isPast(d) && isWithinBookingWindow(d) && !isEffectivelyBlocked(d, blockedDates, openDates),
     );
     const firstValidDay = flat.find((d) => !isPast(d) && isWithinBookingWindow(d));
-    setSelectedDate(firstOpenDay ?? firstValidDay ?? null);
+    return { date: firstOpenDay ?? firstValidDay ?? null };
   }, [target, weeks, blockedDates, openDates]);
+
+  // 사용자가 고른 날짜는 같은 달력(defaultSelection)일 때만 유지된다
+  const [picked, setPicked] = useState<{ date: string; base: typeof defaultSelection } | null>(
+    null,
+  );
+  const selectedDate =
+    picked && picked.base === defaultSelection ? picked.date : defaultSelection.date;
+  const setSelectedDate = (date: string) => setPicked({ date, base: defaultSelection });
 
   function changeMonth(delta: number) {
     let m = month + delta;

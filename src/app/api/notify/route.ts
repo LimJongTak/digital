@@ -9,7 +9,16 @@ export interface NotifyPayload {
   startHour: number;
   endHour: number;
   status: "approved" | "rejected";
+  doorCodes?: { facilityName: string; code: string }[]; // 승인 시 안내할 도어락 비밀번호
+  hasDoorLock?: boolean; // 도어락 시설 포함 여부 (잠금 안내 문구 표시)
 }
+
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+const CLEANUP_NOTICE = "사용 후에는 책상·의자·비품 등을 처음 상태로 정리해 주세요.";
+const LOCK_NOTICE = "Co-Work Zone 사용 후 퇴실 시 도어락을 꼭 잠가 주세요.";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -18,6 +27,9 @@ function buildEmail(p: NotifyPayload) {
   const when = `${p.date} (${weekdayLabel(p.date)}) ${time}`;
   const decision = p.status === "approved" ? "승인" : "반려";
   const subject = `[AX OPEN LAB] 시설예약이 ${decision}되었습니다`;
+  const approved = p.status === "approved";
+  const doorCodes = approved ? (p.doorCodes ?? []).filter((d) => d.code) : [];
+  const notices = approved ? [CLEANUP_NOTICE, ...(p.hasDoorLock ? [LOCK_NOTICE] : [])] : [];
 
   const text = [
     `AX OPEN LAB 시설예약 안내`,
@@ -25,6 +37,8 @@ function buildEmail(p: NotifyPayload) {
     `예약일시: ${when}`,
     `대관장소: ${p.facilityName}`,
     `대관여부: ${decision}`,
+    ...doorCodes.map((d) => `도어락 비밀번호 (${d.facilityName}): ${d.code}`),
+    ...(notices.length ? [``, `[이용 안내]`, ...notices.map((n) => `- ${n}`)] : []),
     ``,
     `본 메일은 발신 전용입니다. 문의사항은 대표전화로 연락해 주세요.`,
   ].join("\n");
@@ -45,7 +59,29 @@ function buildEmail(p: NotifyPayload) {
           <td style="padding:8px 0; color:#666;">대관여부</td>
           <td style="padding:8px 0; font-weight:600; color:${p.status === "approved" ? "#1a7f37" : "#c0392b"};">${decision}</td>
         </tr>
+        ${doorCodes
+          .map(
+            (d) => `
+        <tr>
+          <td style="padding:8px 0; color:#666;">도어락 비밀번호</td>
+          <td style="padding:8px 0; font-weight:600;">${escapeHtml(d.facilityName)}: <span style="font-size:18px; letter-spacing:2px; color:#006cb2;">${escapeHtml(d.code)}</span></td>
+        </tr>`,
+          )
+          .join("")}
       </table>
+      ${
+        notices.length
+          ? `
+      <div style="margin-top:20px; padding:12px 16px; background:#f5f8fb; border-radius:8px; font-size:14px; line-height:1.6;">
+        <p style="margin:0 0 6px; font-weight:600;">이용 안내</p>
+        <ul style="margin:0; padding-left:18px;">
+          ${notices
+            .map((n) => `<li${n === LOCK_NOTICE ? ' style="color:#c0392b; font-weight:600;"' : ""}>${n}</li>`)
+            .join("")}
+        </ul>
+      </div>`
+          : ""
+      }
       <p style="margin-top:24px; font-size:12px; color:#999;">
         본 메일은 발신 전용입니다. 문의사항은 대표전화로 연락해 주세요.
       </p>

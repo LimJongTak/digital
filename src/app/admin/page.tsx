@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { BlockedDate, Facility, Notice, OpenDate, Reservation, ReservationStatus } from "@/lib/types";
 import { STATUS_LABEL } from "@/lib/types";
 import {
@@ -30,6 +30,10 @@ import {
   verifyAdmin,
   changeAdminPassword,
   DEFAULT_SETTINGS,
+  getDoorCodes,
+  updateDoorCode,
+  hasDoorLock,
+  type DoorCodes,
   type SiteSettings,
 } from "@/lib/settings";
 import { isFirebaseConfigured } from "@/lib/firebase";
@@ -47,17 +51,29 @@ type Tab =
   | "site"
   | "password";
 
-export default function AdminPage() {
-  const [authed, setAuthed] = useState(false);
-  const [ready, setReady] = useState(false);
+// 새로고침 후에도 로그인 유지 (세션 스토리지). 로그인/로그아웃 시 구독자에게 알린다.
+const authListeners = new Set<() => void>();
 
-  // 새로고침 후에도 로그인 유지 (세션 스토리지)
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      setAuthed(sessionStorage.getItem(SESSION_KEY) === "1");
-    }
-    setReady(true);
-  }, []);
+function subscribeAuth(cb: () => void) {
+  authListeners.add(cb);
+  return () => {
+    authListeners.delete(cb);
+  };
+}
+
+function setStoredAuth(authed: boolean) {
+  if (authed) sessionStorage.setItem(SESSION_KEY, "1");
+  else sessionStorage.removeItem(SESSION_KEY);
+  authListeners.forEach((cb) => cb());
+}
+
+export default function AdminPage() {
+  // 서버 렌더링 시에는 null → 하이드레이션 후 세션 스토리지 값으로 판단
+  const authed = useSyncExternalStore(
+    subscribeAuth,
+    () => sessionStorage.getItem(SESSION_KEY) === "1",
+    () => null,
+  );
 
   if (!isFirebaseConfigured) {
     return (
@@ -67,27 +83,13 @@ export default function AdminPage() {
     );
   }
 
-  if (!ready) return null;
+  if (authed === null) return null;
 
   if (!authed) {
-    return (
-      <LoginForm
-        onSuccess={() => {
-          sessionStorage.setItem(SESSION_KEY, "1");
-          setAuthed(true);
-        }}
-      />
-    );
+    return <LoginForm onSuccess={() => setStoredAuth(true)} />;
   }
 
-  return (
-    <AdminDashboard
-      onLogout={() => {
-        sessionStorage.removeItem(SESSION_KEY);
-        setAuthed(false);
-      }}
-    />
-  );
+  return <AdminDashboard onLogout={() => setStoredAuth(false)} />;
 }
 
 /* ------------------------------ 로그인 ------------------------------ */
@@ -501,7 +503,6 @@ function ReservationsAdmin() {
   const [rangeEnd, setRangeEnd] = useState(() => defaultReservationRange().end);
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       setItems(await getAllReservations());
     } finally {
@@ -526,6 +527,20 @@ function ReservationsAdmin() {
     const r = row.members[0];
     if (!r.email) return;
     try {
+      // 승인 시 Co-Work Zone 도어락 비밀번호와 잠금 안내를 함께 보낸다.
+      const lockMembers = row.members.filter((m) => hasDoorLock(m.facilityName));
+      const codes = status === "approved" && lockMembers.length ? await getDoorCodes() : {};
+      const doorCodes = lockMembers
+        .filter((m) => codes[m.facilityId])
+        .map((m) => ({
+          facilityName: m.facilityName.replace(COMBO_SUFFIX, ""),
+          code: codes[m.facilityId],
+        }));
+      if (status === "approved" && lockMembers.length > doorCodes.length) {
+        alert(
+          "도어락 비밀번호가 등록되지 않은 시설이 있어 메일에 비밀번호가 빠졌습니다.\n시설 관리 탭에서 비밀번호를 등록하세요.",
+        );
+      }
       const res = await fetch("/api/notify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -536,6 +551,8 @@ function ReservationsAdmin() {
           startHour: r.startHour,
           endHour: r.endHour,
           status,
+          doorCodes,
+          hasDoorLock: lockMembers.length > 0,
         }),
       });
       if (!res.ok) {
@@ -978,7 +995,6 @@ function HolidaysAdmin() {
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       setItems(await getBlockedDates());
     } finally {
@@ -1096,7 +1112,6 @@ function OpenDatesAdmin() {
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       setItems(await getOpenDates());
     } finally {
@@ -1219,7 +1234,6 @@ function NoticesAdmin() {
   const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
       setItems(await getNotices());
     } finally {
@@ -1381,6 +1395,7 @@ function NoticesAdmin() {
 
 function FacilitiesAdmin() {
   const [items, setItems] = useState<Facility[]>([]);
+  const [doorCodes, setDoorCodes] = useState<DoorCodes>({});
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
     name: "",
@@ -1391,9 +1406,10 @@ function FacilitiesAdmin() {
   });
 
   const load = useCallback(async () => {
-    setLoading(true);
     try {
-      setItems(await getFacilities());
+      const [fs, codes] = await Promise.all([getFacilities(), getDoorCodes()]);
+      setItems(fs);
+      setDoorCodes(codes);
     } finally {
       setLoading(false);
     }
@@ -1437,6 +1453,13 @@ function FacilitiesAdmin() {
     if (!Number.isFinite(val) || val < 1) return;
     await updateFacility(f.id, { capacity: val });
     setItems((prev) => prev.map((x) => (x.id === f.id ? { ...x, capacity: val } : x)));
+  }
+
+  async function changeDoorCode(f: Facility, val: string) {
+    const code = val.trim();
+    if (code === (doorCodes[f.id] ?? "")) return;
+    await updateDoorCode(f.id, code);
+    setDoorCodes((prev) => ({ ...prev, [f.id]: code }));
   }
 
   async function seed() {
@@ -1495,6 +1518,19 @@ function FacilitiesAdmin() {
                   />
                   인
                 </div>
+                {hasDoorLock(f.name) && (
+                  <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                    도어락 비밀번호
+                    <input
+                      key={`${f.id}-door-${doorCodes[f.id] ?? ""}`}
+                      defaultValue={doorCodes[f.id] ?? ""}
+                      onBlur={(e) => changeDoorCode(f, e.target.value)}
+                      placeholder="미등록"
+                      className="w-28 rounded-md border border-gray-300 px-2 py-1 text-sm"
+                    />
+                    <span className="text-gray-400">승인 메일로 안내</span>
+                  </div>
+                )}
                 <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
                   운영시간
                   <HourSelect

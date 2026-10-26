@@ -108,3 +108,27 @@ export async function changeAdminPassword(
     { merge: true },
   );
 }
+
+/* ------------------------------ 도어락 비밀번호 ------------------------------ */
+// settings/doorCodes : { [facilityId]: 비밀번호 }
+// 공개 페이지가 읽는 facilities 문서와 분리해 저장하고, 예약 승인 메일에만 담아 보낸다.
+
+export type DoorCodes = Record<string, string>;
+
+// 도어락이 설치된 시설 (Co-Work Zone 1, 2 등)
+export function hasDoorLock(facilityName: string): boolean {
+  return /co-?work/i.test(facilityName);
+}
+
+export async function getDoorCodes(): Promise<DoorCodes> {
+  try {
+    const snap = await getDoc(doc(db, SETTINGS, "doorCodes"));
+    return snap.exists() ? (snap.data() as DoorCodes) : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function updateDoorCode(facilityId: string, code: string): Promise<void> {
+  await setDoc(doc(db, SETTINGS, "doorCodes"), { [facilityId]: code }, { merge: true });
+}

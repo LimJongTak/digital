@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { NAV, findSection, isExternalHref } from "@/lib/nav";
 
 function NavLink({
@@ -31,12 +31,9 @@ function NavLink({
 export default function SiteHeader() {
   const pathname = usePathname();
   const section = findSection(pathname);
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  // 경로가 바뀌면 전체메뉴 닫기
-  useEffect(() => {
-    setMenuOpen(false);
-  }, [pathname]);
+  // 전체메뉴를 연 경로를 기억해 두고, 경로가 바뀌면 자동으로 닫힌 상태가 된다
+  const [menuOpenPath, setMenuOpenPath] = useState<string | null>(null);
+  const menuOpen = menuOpenPath === pathname;
 
   return (
     <>
@@ -72,7 +69,7 @@ export default function SiteHeader() {
           </nav>
 
           <div className="all_menu_btn">
-            <button type="button" aria-label="전체메뉴" onClick={() => setMenuOpen(true)}>
+            <button type="button" aria-label="전체메뉴" onClick={() => setMenuOpenPath(pathname)}>
               <img src="/images/ico/all_menu_open.png" alt="열기" />
             </button>
           </div>
@@ -94,7 +91,7 @@ export default function SiteHeader() {
               type="button"
               className="am_close"
               aria-label="닫기"
-              onClick={() => setMenuOpen(false)}
+              onClick={() => setMenuOpenPath(null)}
             >
               ✕
             </button>
