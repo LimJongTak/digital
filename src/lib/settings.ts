@@ -132,3 +132,92 @@ export async function getDoorCodes(): Promise<DoorCodes> {
 export async function updateDoorCode(facilityId: string, code: string): Promise<void> {
   await setDoc(doc(db, SETTINGS, "doorCodes"), { [facilityId]: code }, { merge: true });
 }
+
+/* ------------------------------ 요일 고정 차단 ------------------------------ */
+// settings/recurringBlocks : { items: RecurringBlock[] }
+// 매주 또는 매월 N번째 요일의 특정 시간대를, 전체 또는 지정한 시설에서 "예약완료"로 막는다
+// (예: 사업단 정기회의).
+// 문서가 아직 없으면 DEFAULT_RECURRING_BLOCKS 를 사용하고, 관리자가 저장하면 그 값이 우선한다.
+
+// 반복 주기: 매주 / 매월 N번째 요일 (nth: 1~4, -1 = 마지막 주)
+export type RecurringRepeat = "weekly" | "monthly";
+
+export interface RecurringBlock {
+  id: string;
+  repeat?: RecurringRepeat; // 없으면 weekly (기존 데이터 호환)
+  nth?: number; // repeat === "monthly" 일 때만 사용
+  weekday: number; // 0=일 … 6=토
+  startHour: number;
+  endHour: number; // 미포함 (11~13 = 11:00, 12:00 슬롯)
+  facilityIds?: string[]; // 비어 있거나 없으면 전체 시설
+  reason?: string;
+}
+
+export const DEFAULT_RECURRING_BLOCKS: RecurringBlock[] = [
+  {
+    id: "default-tue-meeting",
+    repeat: "weekly",
+    weekday: 2,
+    startHour: 11,
+    endHour: 13,
+    facilityIds: [],
+    reason: "사업단 정기회의",
+  },
+];
+
+export async function getRecurringBlocks(): Promise<RecurringBlock[]> {
+  try {
+    const snap = await getDoc(doc(db, SETTINGS, "recurringBlocks"));
+    if (!snap.exists()) return DEFAULT_RECURRING_BLOCKS;
+    const items = (snap.data() as { items?: RecurringBlock[] }).items;
+    return Array.isArray(items) ? items : [];
+  } catch {
+    return DEFAULT_RECURRING_BLOCKS;
+  }
+}
+
+export async function saveRecurringBlocks(items: RecurringBlock[]): Promise<void> {
+  await setDoc(doc(db, SETTINGS, "recurringBlocks"), { items });
+}
+
+const NTH_LABEL: Record<number, string> = { 1: "첫째", 2: "둘째", 3: "셋째", 4: "넷째", 5: "다섯째", [-1]: "마지막" };
+const WEEKDAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
+
+// 관리자 목록 표시용 반복 규칙 문구 (예: "매월 첫째 화요일 11:00~13:00")
+export function describeRecurringBlock(b: RecurringBlock): string {
+  const p = (h: number) => String(h).padStart(2, "0");
+  const when =
+    b.repeat === "monthly"
+      ? `매월 ${NTH_LABEL[b.nth ?? 1] ?? `${b.nth}번째`} ${WEEKDAY_KO[b.weekday]}요일`
+      : `매주 ${WEEKDAY_KO[b.weekday]}요일`;
+  return `${when} ${p(b.startHour)}:00~${p(b.endHour)}:00`;
+}
+
+// 해당 날짜가 반복 규칙(요일 + 주기)에 해당하는지
+function matchesDate(b: RecurringBlock, y: number, m: number, d: number): boolean {
+  if (new Date(y, m - 1, d).getDay() !== b.weekday) return false;
+  if (b.repeat !== "monthly") return true;
+  const nth = b.nth ?? 1;
+  if (nth === -1) return d + 7 > new Date(y, m, 0).getDate(); // 이 달의 마지막 해당 요일
+  return Math.ceil(d / 7) === nth;
+}
+
+function appliesToFacility(b: RecurringBlock, facilityId?: string): boolean {
+  if (!b.facilityIds || b.facilityIds.length === 0) return true; // 전체 시설
+  return facilityId !== undefined && b.facilityIds.includes(facilityId);
+}
+
+// 해당 날짜·시설에 고정 차단되는 시간(슬롯 시작 시각) 집합
+export function recurringBlockedHours(
+  dateStr: string,
+  blocks: RecurringBlock[],
+  facilityId?: string,
+): Set<number> {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const out = new Set<number>();
+  for (const b of blocks) {
+    if (!appliesToFacility(b, facilityId) || !matchesDate(b, y, m, d)) continue;
+    for (let h = b.startHour; h < b.endHour; h++) out.add(h);
+  }
+  return out;
+}

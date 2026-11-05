@@ -33,11 +33,16 @@ import {
   getDoorCodes,
   updateDoorCode,
   hasDoorLock,
+  getRecurringBlocks,
+  saveRecurringBlocks,
+  describeRecurringBlock,
+  type RecurringBlock,
+  type RecurringRepeat,
   type DoorCodes,
   type SiteSettings,
 } from "@/lib/settings";
 import { isFirebaseConfigured } from "@/lib/firebase";
-import { weekdayLabel, isBlockedForPublic, toDateStr, daysInMonth } from "@/lib/date";
+import { weekdayLabel, isBlockedForPublic, toDateStr, daysInMonth, WEEKDAYS } from "@/lib/date";
 import ConfigNotice from "@/components/ConfigNotice";
 
 const SESSION_KEY = "admin_authed";
@@ -1098,7 +1103,231 @@ function HolidaysAdmin() {
       )}
     </div>
     <OpenDatesAdmin />
+    <RecurringBlocksAdmin />
     </>
+  );
+}
+
+/* ----------------------- 요일 고정 차단 (정기회의 등) ----------------------- */
+
+const NTH_OPTIONS = [
+  { value: 1, label: "첫째 주" },
+  { value: 2, label: "둘째 주" },
+  { value: 3, label: "셋째 주" },
+  { value: 4, label: "넷째 주" },
+  { value: -1, label: "마지막 주" },
+];
+
+function RecurringBlocksAdmin() {
+  const [items, setItems] = useState<RecurringBlock[]>([]);
+  const [facilities, setFacilities] = useState<Facility[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [repeat, setRepeat] = useState<RecurringRepeat>("weekly");
+  const [nth, setNth] = useState(1);
+  const [weekday, setWeekday] = useState(2);
+  const [startHour, setStartHour] = useState(11);
+  const [endHour, setEndHour] = useState(13);
+  const [allFacilities, setAllFacilities] = useState(true);
+  const [facilityIds, setFacilityIds] = useState<string[]>([]);
+  const [reason, setReason] = useState("");
+  const [msg, setMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [blocks, fs] = await Promise.all([getRecurringBlocks(), getFacilities()]);
+      setItems(blocks);
+      setFacilities(fs);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  function toggleFacility(id: string) {
+    setFacilityIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  function facilityLabel(b: RecurringBlock): string {
+    if (!b.facilityIds || b.facilityIds.length === 0) return "전체 시설";
+    return b.facilityIds
+      .map((id) => facilities.find((f) => f.id === id)?.name ?? "(삭제된 시설)")
+      .join(", ");
+  }
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    setMsg(null);
+    if (endHour <= startHour) {
+      setMsg({ type: "err", text: "종료 시각은 시작 시각보다 커야 합니다." });
+      return;
+    }
+    if (!allFacilities && facilityIds.length === 0) {
+      setMsg({ type: "err", text: "적용할 시설을 하나 이상 선택하세요." });
+      return;
+    }
+    const block: RecurringBlock = {
+      id: `${Date.now()}`,
+      repeat,
+      weekday,
+      startHour,
+      endHour,
+      facilityIds: allFacilities ? [] : facilityIds,
+      reason: reason.trim(),
+    };
+    if (repeat === "monthly") block.nth = nth; // Firestore는 undefined 필드를 거부하므로 필요할 때만 넣는다
+    const next: RecurringBlock[] = [...items, block].sort(
+      (a, b) => a.weekday - b.weekday || a.startHour - b.startHour,
+    );
+    try {
+      await saveRecurringBlocks(next);
+      setItems(next);
+      setReason("");
+      setMsg({ type: "ok", text: "고정 차단 시간이 추가되었습니다." });
+    } catch (e2) {
+      setMsg({ type: "err", text: e2 instanceof Error ? e2.message : "저장에 실패했습니다." });
+    }
+  }
+
+  async function remove(b: RecurringBlock) {
+    const label = `${describeRecurringBlock(b)} (${facilityLabel(b)})`;
+    if (!confirm(`${label} 고정 차단을 해제하시겠습니까?`)) return;
+    const next = items.filter((x) => x.id !== b.id);
+    await saveRecurringBlocks(next);
+    setItems(next);
+  }
+
+  return (
+    <div className="mt-8 max-w-lg">
+      <h2 className="mb-1 font-semibold text-gray-900">반복 고정 차단 (정기회의 등)</h2>
+      <p className="mb-4 text-sm text-gray-500">
+        매주 또는 매월 반복되는 요일·시간대와 시설을 지정하면 해당 시간이 &quot;예약완료&quot;로
+        표시되어 일반 사용자가 예약할 수 없습니다. (관리자 직접 등록은 가능)
+      </p>
+      <form
+        onSubmit={add}
+        className="mb-6 space-y-3 rounded-lg border border-gray-200 bg-white p-4"
+      >
+        <Field label="반복 주기">
+          <div className="grid grid-cols-2 gap-2">
+            <select
+              value={repeat}
+              onChange={(e) => setRepeat(e.target.value as RecurringRepeat)}
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+            >
+              <option value="weekly">매주</option>
+              <option value="monthly">매월</option>
+            </select>
+            {repeat === "monthly" && (
+              <select
+                value={nth}
+                onChange={(e) => setNth(Number(e.target.value))}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              >
+                {NTH_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        </Field>
+        <Field label="요일">
+          <select
+            value={weekday}
+            onChange={(e) => setWeekday(Number(e.target.value))}
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+          >
+            {WEEKDAYS.map((w, i) => (
+              <option key={i} value={i}>
+                {w}요일
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">시작</label>
+            <HourSelect value={startHour} onChange={setStartHour} full />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-600">종료</label>
+            <HourSelect value={endHour} onChange={setEndHour} full />
+          </div>
+        </div>
+        <Field label="적용 시설">
+          <label className="mb-1 flex items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              checked={allFacilities}
+              onChange={(e) => setAllFacilities(e.target.checked)}
+            />
+            전체 시설
+          </label>
+          {!allFacilities && (
+            <div className="space-y-1 rounded-md border border-gray-200 p-2">
+              {facilities.map((f) => (
+                <label key={f.id} className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={facilityIds.includes(f.id)}
+                    onChange={() => toggleFacility(f.id)}
+                  />
+                  {f.name}
+                </label>
+              ))}
+            </div>
+          )}
+        </Field>
+        <Field label="사유 (선택, 관리자만 표시)">
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="예: 사업단 정기회의"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+          />
+        </Field>
+        {msg && (
+          <p className={`text-sm ${msg.type === "ok" ? "text-green-600" : "text-red-600"}`}>
+            {msg.text}
+          </p>
+        )}
+        <button
+          type="submit"
+          className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          고정 차단 추가
+        </button>
+      </form>
+
+      <h2 className="mb-2 font-semibold text-gray-900">등록된 고정 차단</h2>
+      {loading ? (
+        <p className="text-sm text-gray-500">불러오는 중…</p>
+      ) : items.length === 0 ? (
+        <p className="text-sm text-gray-500">반복으로 막힌 요일·시간대가 없습니다.</p>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((b) => (
+            <li
+              key={b.id}
+              className="flex items-center justify-between rounded-lg border border-gray-200 bg-white p-3"
+            >
+              <div>
+                <span className="font-medium text-gray-900">{describeRecurringBlock(b)}</span>
+                <span className="ml-2 text-xs text-gray-500">{facilityLabel(b)}</span>
+                {b.reason && <span className="ml-2 text-xs text-gray-400">· {b.reason}</span>}
+              </div>
+              <button onClick={() => remove(b)} className="text-xs text-red-500 hover:underline">
+                해제
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

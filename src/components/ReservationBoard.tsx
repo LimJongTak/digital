@@ -21,6 +21,7 @@ import {
   toDateStr,
   startOfToday,
 } from "@/lib/date";
+import { getRecurringBlocks, recurringBlockedHours, type RecurringBlock } from "@/lib/settings";
 
 const COMBO_ID = "__combo_zone1_2__";
 const COMBO_ALL_ID = "__combo_all__";
@@ -77,11 +78,25 @@ function CellIndicator({ status }: { status: DayStatus }) {
   );
 }
 
-function buildBookedMap(reservations: Reservation[]): BookedMap {
+// 실제 예약 + 요일 고정 차단(정기회의 등)을 합쳐 "예약완료" 시간 맵을 만든다.
+function buildBookedMap(
+  reservations: Reservation[],
+  dates: string[],
+  recurring: RecurringBlock[],
+  facilityIds: string[], // 통합 예약이면 대상 시설 중 하나라도 막혀 있으면 차단
+): BookedMap {
   const map: BookedMap = {};
   for (const r of reservations) {
     (map[r.date] ??= new Set());
     for (let h = r.startHour; h < r.endHour; h++) map[r.date].add(h);
+  }
+  for (const date of dates) {
+    for (const facilityId of facilityIds) {
+      const fixed = recurringBlockedHours(date, recurring, facilityId);
+      if (!fixed.size) continue;
+      (map[date] ??= new Set());
+      for (const h of fixed) map[date].add(h);
+    }
   }
   return map;
 }
@@ -145,6 +160,7 @@ export default function ReservationBoard() {
   const [modal, setModal] = useState<{ date: string; startHour: number } | null>(null);
   const [blockedDates, setBlockedDates] = useState<Set<string>>(new Set());
   const [openDates, setOpenDates] = useState<Set<string>>(new Set());
+  const [recurring, setRecurring] = useState<RecurringBlock[]>([]);
 
   const targets = useMemo(() => buildTargets(facilities), [facilities]);
 
@@ -156,12 +172,14 @@ export default function ReservationBoard() {
   useEffect(() => {
     (async () => {
       try {
-        const [fs, blocked, opened] = await Promise.all([
+        const [fs, blocked, opened, fixed] = await Promise.all([
           getFacilities(),
           getBlockedDates(),
           getOpenDates(),
+          getRecurringBlocks(),
         ]);
         setFacilities(fs);
+        setRecurring(fixed);
         setBlockedDates(new Set(blocked.map((b) => b.date)));
         setOpenDates(new Set(opened.map((o) => o.date)));
         if (fs.length) setTargetId(fs[0].id);
@@ -187,8 +205,6 @@ export default function ReservationBoard() {
     loadReservations();
   }, [loadReservations]);
 
-  const bookedMap = useMemo(() => buildBookedMap(reservations), [reservations]);
-
   const hours = useMemo(() => {
     if (!target) return [];
     const out: number[] = [];
@@ -197,6 +213,17 @@ export default function ReservationBoard() {
   }, [target]);
 
   const weeks = useMemo(() => buildCalendar(year, month), [year, month]);
+
+  const bookedMap = useMemo(
+    () =>
+      buildBookedMap(
+        reservations,
+        weeks.flat().filter((d): d is string => !!d),
+        recurring,
+        target?.facilities.map((f) => f.id) ?? [],
+      ),
+    [reservations, weeks, recurring, target],
+  );
 
   // 모바일 일별 상세 패널: 달력이 바뀌면 첫 예약 가능 날짜를 자동 선택
   const defaultSelection = useMemo(() => {

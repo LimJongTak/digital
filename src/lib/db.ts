@@ -13,6 +13,7 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase";
 import { isBlockedForPublic } from "./date";
+import { getRecurringBlocks, recurringBlockedHours } from "./settings";
 import type { BlockedDate, Facility, Notice, OpenDate, Reservation, ReservationStatus } from "./types";
 
 const FACILITIES = "facilities";
@@ -66,6 +67,24 @@ async function isDateBlockedForPublic(date: string): Promise<boolean> {
   if (!isBlockedForPublic(date)) return false;
   const opened = await getDoc(doc(db, OPEN_DATES, date));
   return !opened.exists();
+}
+
+// 요일 고정 차단(예: 매주 화 11~13시 정기회의) 시간대와 겹치면 예약을 막는다.
+async function assertNotRecurringBlocked(
+  facilityIds: string[],
+  date: string,
+  startHour: number,
+  endHour: number,
+) {
+  const blocks = await getRecurringBlocks();
+  for (const facilityId of facilityIds) {
+    const blocked = recurringBlockedHours(date, blocks, facilityId);
+    for (let h = startHour; h < endHour; h++) {
+      if (blocked.has(h)) {
+        throw new Error("이미 예약된 시간대가 포함되어 있습니다. 다시 선택해 주세요.");
+      }
+    }
+  }
 }
 
 /* ------------------------------- 시설 ------------------------------- */
@@ -206,6 +225,9 @@ export async function createReservation(
   if (!opts.allowWeekend && (await isDateBlockedForPublic(input.date))) {
     throw new Error("주말/공휴일 예약은 관리자를 통해서만 가능합니다.");
   }
+  if (!opts.allowWeekend) {
+    await assertNotRecurringBlocked([input.facilityId], input.date, input.startHour, input.endHour);
+  }
 
   const existing = await getReservationsByDate(input.facilityId, input.date);
   const conflict = existing.find((r) =>
@@ -246,6 +268,9 @@ export async function createComboReservation(
 ): Promise<string[]> {
   if (!opts.allowWeekend && (await isDateBlockedForPublic(input.date))) {
     throw new Error("주말/공휴일 예약은 관리자를 통해서만 가능합니다.");
+  }
+  if (!opts.allowWeekend) {
+    await assertNotRecurringBlocked(input.facilities.map((f) => f.id), input.date, input.startHour, input.endHour);
   }
 
   for (const f of input.facilities) {
